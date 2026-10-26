@@ -16,8 +16,7 @@ import { FamilyAlbumView } from './album/FamilyAlbumView';
 import { AdminPanel } from './admin/AdminPanel';
 import { UserProfileView } from './profile/UserProfileView';
 import { MemberProfileModal } from './profile/MemberProfileModal';
-import { Maximize2, Printer, Trash2, AlertTriangle } from 'lucide-react';
-import { PrintExportFamilyTreeModal } from './familyTree/PrintExportFamilyTreeModal';
+import { Maximize2, Trash2, AlertTriangle } from 'lucide-react';
 import { getGenderDisplay } from '../utils/genderUtils';
 
 export const DashboardPage: React.FC = () => {
@@ -25,7 +24,6 @@ export const DashboardPage: React.FC = () => {
   
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
   const [isTreeExpanded, setIsTreeExpanded] = useState<boolean>(true);
-  const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [events, setEvents] = useState<FamilyEvent[]>([]);
   const [photos, setPhotos] = useState<FamilyPhoto[]>([]);
@@ -232,15 +230,6 @@ export const DashboardPage: React.FC = () => {
                         <Maximize2 className="w-3.5 h-3.5" />
                         <span>{isTreeExpanded ? 'Tampilkan Sidebar' : 'Mode Layar Luas'}</span>
                       </button>
-
-                      <button
-                        onClick={() => setIsPrintModalOpen(true)}
-                        className="px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 bg-amber-800 hover:bg-amber-900 text-white shadow-xs transition-all cursor-pointer hover:shadow-md"
-                        title="Cetak & Unduh Silsilah Jadi PDF dan PNG Berbingkai Vintage"
-                      >
-                        <Printer className="w-3.5 h-3.5 text-amber-200" />
-                        <span className="font-serif">Cetak Silsilah (PDF/PNG)</span>
-                      </button>
                     </div>
                   </div>
 
@@ -409,13 +398,6 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Modal Cetak Silsilah Jadi PDF dan PNG Berbingkai Vintage */}
-      <PrintExportFamilyTreeModal
-        isOpen={isPrintModalOpen}
-        onClose={() => setIsPrintModalOpen(false)}
-        members={members}
-      />
 
       {/* Footer */}
       <footer className="mt-auto py-6 bg-white border-t border-stone-200 text-center text-xs text-stone-500">

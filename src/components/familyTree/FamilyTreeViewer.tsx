@@ -594,15 +594,6 @@ export const FamilyTreeViewer: React.FC<FamilyTreeViewerProps> = ({
             <span className="w-2 h-2 rounded-full bg-emerald-600" />
             <span>{viewMode === 'd3' ? 'Mode Visual D3-Tree (SVG Interaktif)' : 'Mode Kartu Responsif'}</span>
           </div>
-
-          <button
-            onClick={() => setIsPrintModalOpen(true)}
-            className="px-3 py-1.5 rounded-xl bg-amber-800 hover:bg-amber-900 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer hover:shadow-md"
-            title="Cetak Silsilah Jadi PDF & PNG Berbingkai Vintage"
-          >
-            <Printer className="w-3.5 h-3.5 text-amber-200" />
-            <span className="font-serif">Cetak Silsilah (PDF / PNG)</span>
-          </button>
         </div>
       </div>
 
@@ -655,6 +646,15 @@ export const FamilyTreeViewer: React.FC<FamilyTreeViewerProps> = ({
               <span className="text-xs text-stone-500 font-medium px-2 py-1 bg-stone-50 rounded border border-stone-200">
                 {Math.round(zoom * 100)}%
               </span>
+
+              <button
+                onClick={() => setIsPrintModalOpen(true)}
+                className="px-2.5 py-1.5 rounded-lg bg-amber-800 hover:bg-amber-900 text-white text-xs font-semibold cursor-pointer transition-all shadow-xs flex items-center gap-1.5 ml-1"
+                title="Cetak Silsilah Jadi PDF & PNG Berbingkai Vintage"
+              >
+                <Printer className="w-3.5 h-3.5 text-amber-200" />
+                <span className="font-serif">Cetak Silsilah (PDF / PNG)</span>
+              </button>
             </div>
           </div>
 
