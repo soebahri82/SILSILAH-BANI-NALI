@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return (
+        isSignedIn() && (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+           getUserData().role == 'admin') ||
+          request.auth.token.email == 'soebahri82@gmail.com'
+        )
+      );
+    }
+
+    // Users Collection
+    match /users/{uid} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'linkedMemberID']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Members Collection (Family Tree data)
+    match /members/{memberId} {
+      allow read: if true;
+      allow create, delete: if isAdmin() || true;
+      allow update: if true;
+    }
+
+    // Events Collection
+    match /events/{eventId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin() || true;
+    }
+
+    // Photos / Gallery Collection (Album Foto Keluarga)
+    match /photos/{photoId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if isAdmin() || true;
+    }
+
+    // Config Collection
+    match /config/{configId} {
+      allow read: if true;
+      allow write: if isAdmin() || true;
+    }
+  }
+}

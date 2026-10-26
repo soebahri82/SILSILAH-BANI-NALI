@@ -1,0 +1,211 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Profil pengguna terdaftar pada portal silsilah Bani Nali.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID"
+        },
+        "username": {
+          "type": "string",
+          "description": "Username pengguna"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Email terdaftar"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Nama tampilan"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "member"],
+          "description": "Peran hak akses pengguna"
+        },
+        "linkedMemberID": {
+          "type": "string",
+          "description": "ID anggota pada koleksi members yang terhubung dengan akun ini"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "URL foto avatar pengguna"
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Status keaktifan akun"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembuatan akun"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembaruan akun terakhir"
+        }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Member": {
+      "title": "Family Member",
+      "description": "Data anggota keluarga Bani Nali sesuai struktur aplikasi silsilah.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID unik anggota silsilah"
+        },
+        "name": {
+          "type": "string",
+          "description": "Nama lengkap anggota"
+        },
+        "birthDate": {
+          "type": "string",
+          "description": "Tanggal lahir (YYYY-MM-DD)"
+        },
+        "deathDate": {
+          "type": "string",
+          "description": "Tanggal wafat jika telah meninggal"
+        },
+        "gender": {
+          "type": "string",
+          "enum": ["L", "P"],
+          "description": "Jenis kelamin: L = Laki-laki, P = Perempuan"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Foto profil anggota keluarga"
+        },
+        "parentID": {
+          "type": "string",
+          "description": "ID orang tua kandung (ayah/ibu) pada koleksi members"
+        },
+        "spouseID": {
+          "type": "string",
+          "description": "ID pasangan suami/istri pada koleksi members"
+        },
+        "spouseIDs": {
+          "type": "array",
+          "description": "Daftar ID pasangan suami/istri jika memiliki 1 atau lebih pasangan"
+        },
+        "bio": {
+          "type": "string",
+          "description": "Biografi singkat atau catatan riwayat hidup"
+        },
+        "birthPlace": {
+          "type": "string",
+          "description": "Kota atau tempat kelahiran"
+        },
+        "address": {
+          "type": "string",
+          "description": "Alamat domisili anggota"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Nomor kontak / WhatsApp"
+        },
+        "privacy": {
+          "type": "string",
+          "enum": ["family"],
+          "description": "Tingkat privasi data personal keluarga Bani Nali (standar: family)"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Waktu pencatatan"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Waktu perubahan terakhir"
+        }
+      },
+      "required": ["id", "name", "gender"]
+    },
+    "Event": {
+      "title": "Family Event",
+      "description": "Acara dan agenda silaturahmi keluarga besar Bani Nali.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID unik acara"
+        },
+        "namaAcara": {
+          "type": "string",
+          "description": "Nama kegiatan atau agenda keluarga"
+        },
+        "tanggal": {
+          "type": "string",
+          "description": "Tanggal dan waktu pelaksanaan acara"
+        },
+        "tempat": {
+          "type": "string",
+          "description": "Lokasi pertemuan atau link pertemuan"
+        },
+        "deskripsi": {
+          "type": "string",
+          "description": "Rincian dan informasi acara"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID pengguna pembuat agenda"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Waktu pembuatan agenda"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Waktu pembaruan agenda"
+        }
+      },
+      "required": ["id", "namaAcara", "tanggal", "tempat"]
+    },
+    "Config": {
+      "title": "App Configuration",
+      "description": "Pengaturan umum aplikasi Bani Nali.",
+      "type": "object",
+      "properties": {
+        "appName": {
+          "type": "string",
+          "description": "Nama aplikasi"
+        },
+        "tagline": {
+          "type": "string",
+          "description": "Slogan atau subjudul"
+        },
+        "announcement": {
+          "type": "string",
+          "description": "Pengumuman beranda"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Waktu pembaruan konfigurasi"
+        }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "Data akun dan hak akses pengguna terdaftar."
+    },
+    "/members/{memberId}": {
+      "schema": "Member",
+      "description": "Data silsilah anggota keluarga Bani Nali."
+    },
+    "/events/{eventId}": {
+      "schema": "Event",
+      "description": "Jadwal dan agenda silaturahmi keluarga."
+    },
+    "/config/{configId}": {
+      "schema": "Config",
+      "description": "Pengaturan dan pengumuman aplikasi."
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "BANI NALI — Family Heritage & Genealogy",
+  "description": "Aplikasi silsilah dan warisan keluarga Bani Nali dengan tampilan modern, bersih, dan elegan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

@@ -1,0 +1,1508 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Users, 
+  Calendar, 
+  ShieldCheck, 
+  Database, 
+  Plus, 
+  Edit3, 
+  Trash2, 
+  Download, 
+  Upload, 
+  Sparkles, 
+  CheckCircle2, 
+  AlertTriangle,
+  Link,
+  UserCheck,
+  UserX
+} from 'lucide-react';
+import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { db } from '../../firebase/config';
+import { FamilyMember, FamilyEvent, UserProfile } from '../../types';
+import { 
+  addMember, 
+  updateMember, 
+  deleteMember, 
+  seedInitialBaniNali, 
+  uploadMemberPhoto,
+  standardizeDatabaseRecords 
+} from '../../services/memberService';
+import { 
+  getMemberSpouseIds, 
+  getMemberSpouses 
+} from '../../utils/familyTreeUtils';
+import { 
+  getGenderCode, 
+  getGenderDisplay, 
+  getGenderLabel,
+  isMale,
+  isFemale 
+} from '../../utils/genderUtils';
+import { 
+  getFatherOfMember, 
+  getMotherOfMember 
+} from '../../utils/relationshipCalculator';
+import { 
+  addEvent, 
+  updateEvent, 
+  deleteEvent, 
+  seedInitialEvents 
+} from '../../services/eventService';
+
+interface AdminPanelProps {
+  members: FamilyMember[];
+  events: FamilyEvent[];
+  onRefreshData: () => void;
+  onSelectMember: (m: FamilyMember) => void;
+}
+
+export const AdminPanel: React.FC<AdminPanelProps> = ({
+  members,
+  events,
+  onRefreshData,
+  onSelectMember,
+}) => {
+  const [activeTab, setActiveTab] = useState<'members' | 'events' | 'users' | 'migration'>('members');
+  const [usersList, setUsersList] = useState<UserProfile[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Member Form State
+  const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
+  const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
+  const [selectedSpouseIds, setSelectedSpouseIds] = useState<string[]>([]);
+  const [memberFormData, setMemberFormData] = useState<Partial<FamilyMember>>({
+    name: '',
+    gender: 'L',
+    birthDate: '',
+    deathDate: '',
+    birthPlace: '',
+    address: '',
+    phone: '',
+    parentID: '',
+    spouseID: '',
+    privacy: 'family',
+    bio: '',
+    photoURL: '',
+  });
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [isSavingMember, setIsSavingMember] = useState(false);
+  const [isStandardizingDb, setIsStandardizingDb] = useState(false);
+
+  // Delete Member Confirmation State
+  const [memberToDelete, setMemberToDelete] = useState<FamilyMember | null>(null);
+  const [isDeletingMember, setIsDeletingMember] = useState(false);
+
+  // Event Form State
+  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<FamilyEvent | null>(null);
+  const [eventFormData, setEventFormData] = useState<Partial<FamilyEvent>>({
+    namaAcara: '',
+    tanggal: '',
+    tempat: '',
+    deskripsi: '',
+  });
+
+  // Delete Event Confirmation State
+  const [eventToDelete, setEventToDelete] = useState<FamilyEvent | null>(null);
+  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
+
+  // Seed Initial Lineage Confirmation State
+  const [isSeedModalOpen, setIsSeedModalOpen] = useState(false);
+  const [isSeeding, setIsSeeding] = useState(false);
+
+  // Load Users from Firestore
+  const loadUsers = async () => {
+    setLoadingUsers(true);
+    try {
+      const snap = await getDocs(collection(db, 'users'));
+      const list: UserProfile[] = [];
+      snap.forEach((d) => list.push({ ...d.data(), uid: d.id } as UserProfile));
+      setUsersList(list);
+    } catch (err) {
+      console.error('Error loading users:', err);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'users') {
+      loadUsers();
+    }
+  }, [activeTab]);
+
+  // Open Member Modal for Add/Edit
+  const handleOpenMemberModal = (m?: FamilyMember) => {
+    const memberMap = new Map<string, FamilyMember>();
+    members.forEach((mem) => memberMap.set(mem.id, mem));
+
+    if (m) {
+      const f = getFatherOfMember(m, members, memberMap);
+      const mo = getMotherOfMember(m, members, memberMap);
+
+      setEditingMember(m);
+      setMemberFormData({ 
+        ...m,
+        fatherID: m.fatherID || f?.id || '',
+        motherID: m.motherID || mo?.id || '',
+        gender: getGenderCode(m.gender),
+        privacy: 'family',
+      });
+      setSelectedSpouseIds(getMemberSpouseIds(m, members));
+    } else {
+      setEditingMember(null);
+      setSelectedSpouseIds([]);
+      setMemberFormData({
+        id: `M${Date.now().toString().slice(-4)}`,
+        name: '',
+        gender: 'L',
+        birthDate: '',
+        deathDate: '',
+        birthPlace: '',
+        address: '',
+        phone: '',
+        parentID: '',
+        fatherID: '',
+        motherID: '',
+        spouseID: '',
+        privacy: 'family',
+        bio: '',
+        photoURL: '',
+      });
+    }
+    setPhotoFile(null);
+    setIsMemberModalOpen(true);
+  };
+
+  // Save Member
+  const handleSaveMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!memberFormData.name?.trim()) return;
+
+    setIsSavingMember(true);
+    try {
+      let finalPhotoURL = memberFormData.photoURL || '';
+      const targetId = editingMember ? editingMember.id : memberFormData.id || `M${Date.now().toString().slice(-4)}`;
+
+      if (photoFile) {
+        finalPhotoURL = await uploadMemberPhoto(targetId, photoFile);
+      }
+
+      const fatherId = memberFormData.fatherID?.trim() || null;
+      const motherId = memberFormData.motherID?.trim() || null;
+
+      let combinedParentID = memberFormData.parentID;
+      if (fatherId) {
+        combinedParentID = fatherId;
+      } else if (motherId) {
+        combinedParentID = motherId;
+      }
+
+      const payload = {
+        ...memberFormData,
+        id: targetId,
+        photoURL: finalPhotoURL,
+        gender: getGenderCode(memberFormData.gender),
+        privacy: 'family',
+        fatherID: fatherId,
+        motherID: motherId,
+        parentID: combinedParentID || null,
+        spouseID: selectedSpouseIds.length > 0 ? selectedSpouseIds.join(', ') : null,
+        spouseIDs: selectedSpouseIds,
+      } as FamilyMember;
+
+      if (editingMember) {
+        await updateMember(editingMember.id, payload);
+        setStatusMessage({ type: 'success', text: `Data anggota "${payload.name}" berhasil diperbarui.` });
+      } else {
+        await addMember(payload);
+        setStatusMessage({ type: 'success', text: `Anggota baru "${payload.name}" berhasil ditambahkan.` });
+      }
+
+      setIsMemberModalOpen(false);
+      onRefreshData();
+    } catch (err: unknown) {
+      setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : 'Gagal menyimpan anggota.' });
+    } finally {
+      setIsSavingMember(false);
+    }
+  };
+
+  // Delete Member Confirmation Handlers
+  const handleConfirmDeleteMember = async () => {
+    if (!memberToDelete) return;
+    setIsDeletingMember(true);
+    try {
+      await deleteMember(memberToDelete.id);
+      setStatusMessage({ 
+        type: 'success', 
+        text: `Anggota "${memberToDelete.name}" berhasil dihapus dari sistem silsilah.` 
+      });
+      setMemberToDelete(null);
+      onRefreshData();
+    } catch (err: unknown) {
+      setStatusMessage({ 
+        type: 'error', 
+        text: err instanceof Error ? err.message : 'Gagal menghapus anggota.' 
+      });
+    } finally {
+      setIsDeletingMember(false);
+    }
+  };
+
+  // Delete Event Confirmation Handler
+  const handleConfirmDeleteEvent = async () => {
+    if (!eventToDelete) return;
+    setIsDeletingEvent(true);
+    try {
+      await deleteEvent(eventToDelete.id);
+      setStatusMessage({
+        type: 'success',
+        text: `Acara "${eventToDelete.namaAcara}" berhasil dihapus.`,
+      });
+      setEventToDelete(null);
+      onRefreshData();
+    } catch (err: unknown) {
+      setStatusMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Gagal menghapus acara.',
+      });
+    } finally {
+      setIsDeletingEvent(false);
+    }
+  };
+
+  // Save Event
+  const handleSaveEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!eventFormData.namaAcara || !eventFormData.tanggal || !eventFormData.tempat) return;
+
+    try {
+      if (editingEvent) {
+        await updateEvent(editingEvent.id, eventFormData);
+        setStatusMessage({ type: 'success', text: `Acara "${eventFormData.namaAcara}" berhasil diperbarui.` });
+      } else {
+        await addEvent({
+          id: `E${Date.now().toString().slice(-4)}`,
+          namaAcara: eventFormData.namaAcara,
+          tanggal: eventFormData.tanggal,
+          tempat: eventFormData.tempat,
+          deskripsi: eventFormData.deskripsi || '',
+        });
+        setStatusMessage({ type: 'success', text: `Acara "${eventFormData.namaAcara}" berhasil dibuat.` });
+      }
+      setIsEventModalOpen(false);
+      onRefreshData();
+    } catch (err: unknown) {
+      setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : 'Gagal menyimpan acara.' });
+    }
+  };
+
+  // Toggle User Role
+  const handleToggleUserRole = async (user: UserProfile) => {
+    const nextRole = user.role === 'admin' ? 'member' : 'admin';
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        role: nextRole,
+        updatedAt: new Date().toISOString(),
+      });
+      setStatusMessage({ type: 'success', text: `Peran ${user.email} diubah menjadi ${nextRole}.` });
+      loadUsers();
+    } catch (err: unknown) {
+      setStatusMessage({ type: 'error', text: 'Gagal mengubah peran pengguna.' });
+    }
+  };
+
+  // Link User to Member ID
+  const handleLinkUserMember = async (uid: string, memberId: string) => {
+    try {
+      await updateDoc(doc(db, 'users', uid), {
+        linkedMemberID: memberId || null,
+        updatedAt: new Date().toISOString(),
+      });
+      setStatusMessage({ type: 'success', text: `Akun berhasil dihubungkan dengan ID anggota ${memberId}.` });
+      loadUsers();
+    } catch (err) {
+      setStatusMessage({ type: 'error', text: 'Gagal menghubungkan akun.' });
+    }
+  };
+
+  // Seed Initial Lineage Modal Handler
+  const handleConfirmSeedLineage = async () => {
+    setIsSeeding(true);
+    try {
+      const count = await seedInitialBaniNali();
+      await seedInitialEvents();
+      setStatusMessage({ type: 'success', text: `Berhasil memuat ${count} anggota silsilah Bani Nali ke Firestore!` });
+      setIsSeedModalOpen(false);
+      onRefreshData();
+    } catch (err: unknown) {
+      setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : 'Gagal memuat data awal.' });
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
+  // Export JSON
+  const handleExportJSON = () => {
+    const backupData = {
+      exportedAt: new Date().toISOString(),
+      members,
+      events,
+      users: usersList.map(({ ...safeUser }) => safeUser),
+    };
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `BaniNali_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Standarisasi Database Firestore (L = Laki-laki, P = Perempuan, Privasi = family)
+  const handleStandardizeDatabase = async () => {
+    setIsStandardizingDb(true);
+    try {
+      const updatedCount = await standardizeDatabaseRecords();
+      setStatusMessage({
+        type: 'success',
+        text: `Standarisasi selesai! ${updatedCount} data berhasil diperbarui ke format standar (L/P dan Privasi family).`,
+      });
+      onRefreshData();
+    } catch (err: unknown) {
+      setStatusMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Gagal standarisasi database.',
+      });
+    } finally {
+      setIsStandardizingDb(false);
+    }
+  };
+
+  // Export CSV Members
+  const handleExportCSV = () => {
+    const headers = [
+      'ID', 'Name', 'BirthDate', 'DeathDate', 'Gender', 'PhotoURL',
+      'ParentID', 'SpouseID', 'Bio', 'BirthPlace', 'Address', 'Phone', 'Privacy'
+    ];
+    const rows = members.map((m) => [
+      m.id,
+      `"${(m.name || '').replace(/"/g, '""')}"`,
+      m.birthDate || '',
+      m.deathDate || '',
+      m.gender || '',
+      `"${(m.photoURL || '').replace(/"/g, '""')}"`,
+      m.parentID || '',
+      m.spouseID || '',
+      `"${(m.bio || '').replace(/"/g, '""')}"`,
+      `"${(m.birthPlace || '').replace(/"/g, '""')}"`,
+      `"${(m.address || '').replace(/"/g, '""')}"`,
+      `"${(m.phone || '').replace(/"/g, '""')}"`,
+      m.privacy || 'family'
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `BaniNali_Members_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Import JSON / CSV handler
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        if (file.name.endsWith('.json')) {
+          const parsed = JSON.parse(text);
+          const membersToImport = Array.isArray(parsed) ? parsed : parsed.members;
+          if (Array.isArray(membersToImport)) {
+            for (const m of membersToImport) {
+              if (m.name && m.id) {
+                await addMember({
+                  ...m,
+                  gender: getGenderCode(m.gender),
+                  privacy: 'family',
+                });
+              }
+            }
+            setStatusMessage({ type: 'success', text: `Berhasil mengimpor ${membersToImport.length} anggota dari JSON.` });
+            onRefreshData();
+          }
+        } else if (file.name.endsWith('.csv')) {
+          // Simple CSV parser
+          const lines = text.split('\n').filter((l) => l.trim().length > 0);
+          if (lines.length > 1) {
+            let importedCount = 0;
+            for (let i = 1; i < lines.length; i++) {
+              const cols = lines[i].split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+              if (cols[1]) {
+                const member: Partial<FamilyMember> = {
+                  id: cols[0] || `M${Date.now() + i}`,
+                  name: cols[1],
+                  birthDate: cols[2] || '',
+                  deathDate: cols[3] || '',
+                  gender: getGenderCode(cols[4]),
+                  photoURL: cols[5] || '',
+                  parentID: cols[6] || null,
+                  spouseID: cols[7] || null,
+                  bio: cols[8] || '',
+                  birthPlace: cols[9] || '',
+                  address: cols[10] || '',
+                  phone: cols[11] || '',
+                  privacy: 'family',
+                };
+                await addMember(member as FamilyMember);
+                importedCount++;
+              }
+            }
+            setStatusMessage({ type: 'success', text: `Berhasil mengimpor ${importedCount} anggota dari file CSV.` });
+            onRefreshData();
+          }
+        }
+      } catch (err: unknown) {
+        setStatusMessage({ type: 'error', text: 'Format file tidak valid atau gagal dibaca.' });
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Top Banner */}
+      <div className="bg-stone-900 text-white p-6 sm:p-8 rounded-2xl border border-stone-800 shadow-md">
+        <div className="flex items-center gap-2 text-amber-400 text-xs font-semibold uppercase tracking-wider mb-2">
+          <ShieldCheck className="w-4 h-4" />
+          <span>Panel Administrasi Utama</span>
+        </div>
+        <h2 className="text-2xl sm:text-3xl font-bold font-serif-heritage">
+          Pengelolaan Silsilah & Data Keluarga
+        </h2>
+        <p className="mt-1.5 text-xs sm:text-sm text-stone-300 max-w-xl">
+          Kelola data anggota trah, jadwal acara silaturahmi, akun pengguna terdaftar, 
+          serta backup dan migrasi data dari format Google Sheets lama.
+        </p>
+
+        {/* Status Toast */}
+        {statusMessage && (
+          <div
+            className={`mt-4 p-3 rounded-xl text-xs font-medium flex items-center justify-between ${
+              statusMessage.type === 'success'
+                ? 'bg-emerald-950/80 border border-emerald-700 text-emerald-200'
+                : 'bg-red-950/80 border border-red-700 text-red-200'
+            }`}
+          >
+            <span>{statusMessage.text}</span>
+            <button
+              onClick={() => setStatusMessage(null)}
+              className="text-stone-400 hover:text-white"
+            >
+              &times;
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="bg-white p-3 rounded-2xl border border-stone-200 shadow-xs flex items-center gap-2 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('members')}
+          className={`px-4 py-2 text-xs sm:text-sm font-medium rounded-xl transition-colors cursor-pointer flex items-center gap-2 ${
+            activeTab === 'members'
+              ? 'bg-emerald-800 text-white shadow-xs'
+              : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>Data Anggota ({members.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('events')}
+          className={`px-4 py-2 text-xs sm:text-sm font-medium rounded-xl transition-colors cursor-pointer flex items-center gap-2 ${
+            activeTab === 'events'
+              ? 'bg-emerald-800 text-white shadow-xs'
+              : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'
+          }`}
+        >
+          <Calendar className="w-4 h-4" />
+          <span>Acara ({events.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('users')}
+          className={`px-4 py-2 text-xs sm:text-sm font-medium rounded-xl transition-colors cursor-pointer flex items-center gap-2 ${
+            activeTab === 'users'
+              ? 'bg-emerald-800 text-white shadow-xs'
+              : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4" />
+          <span>Pengguna & Peran</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('migration')}
+          className={`px-4 py-2 text-xs sm:text-sm font-medium rounded-xl transition-colors cursor-pointer flex items-center gap-2 ${
+            activeTab === 'migration'
+              ? 'bg-emerald-800 text-white shadow-xs'
+              : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          <span>Migrasi & Cadangan</span>
+        </button>
+      </div>
+
+      {/* Tab Content: MEMBERS */}
+      {activeTab === 'members' && (
+        <div className="bg-white rounded-2xl border border-stone-200 shadow-xs p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-bold text-stone-900">
+                Daftar & Sunting Anggota
+              </h3>
+              <p className="text-xs text-stone-500">
+                Menyimpan identitas, relasi parentID, spouseID, dan privasi
+              </p>
+            </div>
+            <button
+              onClick={() => handleOpenMemberModal()}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Anggota</span>
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-stone-700">
+              <thead className="bg-stone-50 text-stone-500 uppercase tracking-wider text-[11px] border-b border-stone-200">
+                <tr>
+                  <th className="py-3 px-3">ID</th>
+                  <th className="py-3 px-3">Nama</th>
+                  <th className="py-3 px-3">Gender</th>
+                  <th className="py-3 px-3">Parent ID</th>
+                  <th className="py-3 px-3">Spouse ID</th>
+                  <th className="py-3 px-3">Privasi</th>
+                  <th className="py-3 px-3 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {members.map((m) => {
+                  const mSpouseIds = getMemberSpouseIds(m, members);
+                  const mSpouses = getMemberSpouses(m, members);
+                  return (
+                    <tr key={m.id} className="hover:bg-stone-50">
+                      <td className="py-2.5 px-3 font-mono text-stone-500">{m.id}</td>
+                      <td className="py-2.5 px-3 font-semibold text-stone-900">{m.name}</td>
+                      <td className="py-2.5 px-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                          isMale(m.gender)
+                            ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                            : 'bg-amber-50 text-amber-900 border-amber-300'
+                        }`}>
+                          {getGenderDisplay(m.gender)}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-stone-500">{m.parentID || '-'}</td>
+                      <td className="py-2.5 px-3 text-stone-600">
+                        {mSpouses.length === 0 ? (
+                          <span className="text-stone-400 font-mono">-</span>
+                        ) : mSpouses.length === 1 ? (
+                          <span className="text-stone-800">{mSpouses[0].name}</span>
+                        ) : (
+                          <div className="space-y-0.5">
+                            <span className="font-semibold text-amber-800 text-[10px] bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200 block w-fit">
+                              {mSpouses.length} Pasangan
+                            </span>
+                            <span className="text-[11px] text-stone-700 block truncate max-w-[180px]">
+                              {mSpouses.map((s) => s.name).join(', ')}
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span className="font-medium text-stone-700 bg-stone-100 px-2 py-0.5 rounded text-[11px] border border-stone-200">
+                          family
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-right space-x-1">
+                        <button
+                          onClick={() => handleOpenMemberModal(m)}
+                          className="p-1 text-stone-600 hover:text-emerald-800 cursor-pointer"
+                          title="Sunting"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setMemberToDelete(m)}
+                          className="p-1 text-red-600 hover:text-red-800 cursor-pointer"
+                          title="Hapus Anggota"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Tab Content: EVENTS */}
+      {activeTab === 'events' && (
+        <div className="bg-white rounded-2xl border border-stone-200 shadow-xs p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-bold text-stone-900">
+                Kelola Jadwal & Acara Keluarga
+              </h3>
+              <p className="text-xs text-stone-500">
+                Agenda silaturahmi yang muncul pada Dashboard dan Halaman Acara
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setEditingEvent(null);
+                setEventFormData({ namaAcara: '', tanggal: '', tempat: '', deskripsi: '' });
+                setIsEventModalOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Acara</span>
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {events.map((ev) => (
+              <div
+                key={ev.id}
+                className="p-4 rounded-xl border border-stone-200 bg-stone-50 flex items-center justify-between gap-4"
+              >
+                <div>
+                  <h4 className="font-semibold text-stone-900 text-sm">{ev.namaAcara}</h4>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    {ev.tanggal} · {ev.tempat}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setEditingEvent(ev);
+                      setEventFormData(ev);
+                      setIsEventModalOpen(true);
+                    }}
+                    className="p-1.5 text-stone-600 hover:text-emerald-800 cursor-pointer"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setEventToDelete(ev)}
+                    className="p-1.5 text-red-600 hover:text-red-800 cursor-pointer"
+                    title="Hapus Acara"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tab Content: USERS */}
+      {activeTab === 'users' && (
+        <div className="bg-white rounded-2xl border border-stone-200 shadow-xs p-6 space-y-4">
+          <div>
+            <h3 className="text-base font-bold text-stone-900">
+              Kelola Pengguna & Hak Akses (Role)
+            </h3>
+            <p className="text-xs text-stone-500">
+              Pengguna dengan role <strong>admin</strong> memiliki akses penuh; role <strong>member</strong> dibatasi sesuai aturan privasi.
+            </p>
+          </div>
+
+          {loadingUsers ? (
+            <div className="p-8 text-center text-xs text-stone-500">Memuat data pengguna...</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-stone-700">
+                <thead className="bg-stone-50 text-stone-500 uppercase tracking-wider text-[11px] border-b border-stone-200">
+                  <tr>
+                    <th className="py-3 px-3">Email & Tampilan</th>
+                    <th className="py-3 px-3">Role Saat Ini</th>
+                    <th className="py-3 px-3">Tautan Silsilah (linkedMemberID)</th>
+                    <th className="py-3 px-3 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {usersList.map((u) => (
+                    <tr key={u.uid} className="hover:bg-stone-50">
+                      <td className="py-3 px-3">
+                        <div className="font-semibold text-stone-900">{u.displayName || u.email}</div>
+                        <div className="text-[10px] text-stone-400 font-mono">{u.email}</div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                            u.role === 'admin'
+                              ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                              : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                          }`}
+                        >
+                          {u.role}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <select
+                          value={u.linkedMemberID || ''}
+                          onChange={(e) => handleLinkUserMember(u.uid, e.target.value)}
+                          className="text-xs p-1 bg-stone-50 border border-stone-200 rounded max-w-[200px]"
+                        >
+                          <option value="">-- Belum Ditautkan --</option>
+                          {members.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.id}: {m.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        <button
+                          onClick={() => handleToggleUserRole(u)}
+                          className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded text-[11px] font-medium border border-stone-300 cursor-pointer"
+                        >
+                          Jadikan {u.role === 'admin' ? 'Member' : 'Admin'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab Content: MIGRATION & BACKUP */}
+      {activeTab === 'migration' && (
+        <div className="bg-white rounded-2xl border border-stone-200 shadow-xs p-6 space-y-6">
+          <div>
+            <h3 className="text-base font-bold text-stone-900">
+              Migrasi Data Lama & Ekspor Cadangan
+            </h3>
+            <p className="text-xs text-stone-500">
+              Kompatibel penuh dengan struktur spreadsheet aplikasi lama Bani Nali (ParentID, SpouseID, LinkedMemberID).
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Box 1: Seeder Cepat */}
+            <div className="p-5 rounded-xl border border-amber-200 bg-amber-50/50 space-y-3">
+              <div className="flex items-center gap-2 text-amber-900 font-semibold text-sm">
+                <Sparkles className="w-4 h-4 text-amber-700" />
+                <span>Inisialisasi Silsilah Bani Nali</span>
+              </div>
+              <p className="text-xs text-amber-900/80 leading-relaxed">
+                Muat data lengkap 4 generasi Bani Nali (K.H. Nali & Hj. Fatimah, 3 anak, 8 cucu, dan 5 cicit) 
+                langsung ke database Cloud Firestore untuk memulai silsilah.
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsSeedModalOpen(true)}
+                className="w-full py-2.5 px-4 bg-amber-800 hover:bg-amber-900 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+              >
+                Muat Data Awal Bani Nali (Seeder)
+              </button>
+            </div>
+
+            {/* Box: Standarisasi Format Database */}
+            <div className="p-5 rounded-xl border border-emerald-200 bg-emerald-50/50 space-y-3">
+              <div className="flex items-center gap-2 text-emerald-900 font-semibold text-sm">
+                <ShieldCheck className="w-4 h-4 text-emerald-700" />
+                <span>Standarisasi Format Database (L/P & family)</span>
+              </div>
+              <p className="text-xs text-emerald-950/80 leading-relaxed">
+                Sesuaikan seluruh record anggota di Cloud Firestore: jenis kelamin menjadi <strong>L</strong> (Laki-laki) atau <strong>P</strong> (Perempuan), 
+                dan tingkat privasi menjadi <strong>family</strong>.
+              </p>
+              <button
+                type="button"
+                disabled={isStandardizingDb}
+                onClick={handleStandardizeDatabase}
+                className="w-full py-2.5 px-4 bg-emerald-800 hover:bg-emerald-900 disabled:bg-emerald-400 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+              >
+                {isStandardizingDb ? 'Memproses Standarisasi...' : 'Jalankan Standarisasi Database Sekarang'}
+              </button>
+            </div>
+
+            {/* Box 2: Ekspor Data */}
+            <div className="p-5 rounded-xl border border-stone-200 bg-stone-50 space-y-3">
+              <div className="flex items-center gap-2 text-stone-900 font-semibold text-sm">
+                <Download className="w-4 h-4 text-emerald-800" />
+                <span>Ekspor Data (Backup)</span>
+              </div>
+              <p className="text-xs text-stone-600 leading-relaxed">
+                Unduh seluruh data anggota silsilah dan acara dalam format standar tanpa menyertakan kredensial pengguna.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportCSV}
+                  className="flex-1 py-2 px-3 bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 rounded-lg text-xs font-semibold shadow-xs cursor-pointer"
+                >
+                  Ekspor CSV (Sheets)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportJSON}
+                  className="flex-1 py-2 px-3 bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 rounded-lg text-xs font-semibold shadow-xs cursor-pointer"
+                >
+                  Ekspor JSON
+                </button>
+              </div>
+            </div>
+
+            {/* Box 3: Impor CSV / JSON */}
+            <div className="p-5 rounded-xl border border-stone-200 bg-stone-50 space-y-3 md:col-span-2">
+              <div className="flex items-center gap-2 text-stone-900 font-semibold text-sm">
+                <Upload className="w-4 h-4 text-emerald-800" />
+                <span>Impor File CSV / JSON dari Google Sheets Lama</span>
+              </div>
+              <p className="text-xs text-stone-600 leading-relaxed">
+                Pilih file CSV atau JSON hasil ekspor Google Sheets. Kolom yang dibaca: 
+                <code>ID, Name, BirthDate, DeathDate, Gender, PhotoURL, ParentID, SpouseID, Bio, BirthPlace, Address, Phone, Privacy</code>.
+              </p>
+              <input
+                type="file"
+                accept=".csv, .json"
+                onChange={handleImportFile}
+                className="block w-full text-xs text-stone-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-800 file:text-white hover:file:bg-emerald-900 cursor-pointer"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Member Form Modal */}
+      {isMemberModalOpen && (
+        <div 
+          onClick={() => setIsMemberModalOpen(false)}
+          className="fixed inset-0 z-50 flex items-start justify-center p-2 sm:p-4 md:p-6 bg-stone-900/60 backdrop-blur-xs overflow-y-auto"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl shadow-xl border border-stone-200 w-full max-w-2xl overflow-hidden my-2 sm:my-6 relative shrink-0"
+          >
+            <div className="p-5 bg-stone-900 text-white flex items-center justify-between">
+              <h3 className="font-bold text-base">
+                {editingMember ? 'Sunting Data Anggota' : 'Tambah Anggota Baru'}
+              </h3>
+              <button
+                onClick={() => setIsMemberModalOpen(false)}
+                className="text-stone-400 hover:text-white"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveMember} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1">ID Anggota</label>
+                  <input
+                    type="text"
+                    value={memberFormData.id || ''}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, id: e.target.value })}
+                    required
+                    className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1">Nama Lengkap *</label>
+                  <input
+                    type="text"
+                    value={memberFormData.name || ''}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, name: e.target.value })}
+                    required
+                    placeholder="contoh: K.H. Nali bin Abdullah"
+                    className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1">Jenis Kelamin (Database: L / P)</label>
+                  <select
+                    value={getGenderCode(memberFormData.gender)}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, gender: e.target.value as any })}
+                    className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900 font-medium"
+                  >
+                    <option value="L">L = Laki-laki</option>
+                    <option value="P">P = Perempuan</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1">Tingkat Privasi (Database: family)</label>
+                  <select
+                    value="family"
+                    disabled
+                    className="w-full p-2 bg-stone-100 border border-stone-300 rounded-lg text-stone-700 font-semibold cursor-not-allowed"
+                  >
+                    <option value="family">family (Keluarga Besar Bani Nali)</option>
+                  </select>
+                  <span className="text-[10px] text-stone-500 mt-1 block">
+                    Seluruh data anggota disetel ke tingkat privasi keluarga (family).
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1">Tanggal Lahir</label>
+                  <input
+                    type="date"
+                    value={memberFormData.birthDate || ''}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, birthDate: e.target.value })}
+                    className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1">Tanggal Wafat (Opsional)</label>
+                  <input
+                    type="date"
+                    value={memberFormData.deathDate || ''}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, deathDate: e.target.value })}
+                    className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1">Tempat Lahir</label>
+                  <input
+                    type="text"
+                    value={memberFormData.birthPlace || ''}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, birthPlace: e.target.value })}
+                    placeholder="contoh: Pasuruan, Jawa Timur"
+                    className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1">Nomor Telepon / WhatsApp</label>
+                  <input
+                    type="text"
+                    value={memberFormData.phone || ''}
+                    onChange={(e) => setMemberFormData({ ...memberFormData, phone: e.target.value })}
+                    placeholder="08123456789"
+                    className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                  />
+                </div>
+
+                {/* Ayah Kandung (Paternal / Garis Trah) */}
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1 flex items-center justify-between">
+                    <span>👨 Nama Ayah (Ayah Kandung / Garis Trah)</span>
+                    <span className="text-[10px] text-stone-400 font-normal">Paternal</span>
+                  </label>
+                  <select
+                    value={memberFormData.fatherID || memberFormData.parentID || ''}
+                    onChange={(e) => {
+                      const selectedFatherId = e.target.value;
+                      const updated: any = { 
+                        ...memberFormData, 
+                        fatherID: selectedFatherId,
+                        parentID: selectedFatherId || memberFormData.motherID || ''
+                      };
+                      // Smart suggestion: jika ayah memiliki pasangan tunggal dan ibu belum terisi, otomatis sarankan ibu
+                      if (selectedFatherId && !memberFormData.motherID) {
+                        const fMember = members.find((m) => m.id === selectedFatherId);
+                        if (fMember) {
+                          const spouses = getMemberSpouseIds(fMember, members);
+                          if (spouses.length === 1) {
+                            updated.motherID = spouses[0];
+                          }
+                        }
+                      }
+                      setMemberFormData(updated);
+                    }}
+                    className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900 text-xs"
+                  >
+                    <option value="">-- Tidak ada / Sesepuh Utama --</option>
+                    {members
+                      .filter((m) => m.id !== memberFormData.id && isMale(m.gender))
+                      .map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} ({m.id}{m.birthDate ? ` · Thn ${m.birthDate.split('-')[0]}` : ''})
+                        </option>
+                      ))}
+                    <optgroup label="Anggota Lainnya">
+                      {members
+                        .filter((m) => m.id !== memberFormData.id && !isMale(m.gender))
+                        .map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name} ({m.id})
+                          </option>
+                        ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* Ibu Kandung (Maternal / Garis Ibu) */}
+                <div>
+                  <label className="block font-semibold text-stone-700 mb-1 flex items-center justify-between">
+                    <span>👩 Nama Ibu (Ibu Kandung / Pasangan)</span>
+                    <span className="text-[10px] text-stone-400 font-normal">Maternal</span>
+                  </label>
+                  <select
+                    value={memberFormData.motherID || ''}
+                    onChange={(e) => {
+                      const selectedMotherId = e.target.value;
+                      setMemberFormData({ 
+                        ...memberFormData, 
+                        motherID: selectedMotherId,
+                        parentID: memberFormData.fatherID || selectedMotherId || memberFormData.parentID || ''
+                      });
+                    }}
+                    className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900 text-xs"
+                  >
+                    <option value="">-- Tidak ada / Belum Terdata --</option>
+                    {members
+                      .filter((m) => m.id !== memberFormData.id && isFemale(m.gender))
+                      .map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} ({m.id}{m.birthDate ? ` · Thn ${m.birthDate.split('-')[0]}` : ''})
+                        </option>
+                      ))}
+                    <optgroup label="Anggota Lainnya">
+                      {members
+                        .filter((m) => m.id !== memberFormData.id && !isFemale(m.gender))
+                        .map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name} ({m.id})
+                          </option>
+                        ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2 p-3 bg-stone-50 rounded-xl border border-stone-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block font-semibold text-stone-800">
+                      Pasangan (Mendukung 1 atau Lebih Pasangan)
+                    </label>
+                    <span className="text-[10px] text-stone-500">
+                      Misal: Istri pertama wafat, lalu menikah lagi
+                    </span>
+                  </div>
+
+                  {/* List of currently selected spouses */}
+                  {selectedSpouseIds.length > 0 ? (
+                    <div className="space-y-1.5 mb-2.5">
+                      {selectedSpouseIds.map((sId, idx) => {
+                        const targetMember = members.find((m) => m.id === sId);
+                        return (
+                          <div
+                            key={sId}
+                            className="flex items-center justify-between p-2 bg-white rounded-lg border border-stone-200 text-xs"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded text-[10px] border border-amber-200">
+                                Pasangan #{idx + 1}
+                              </span>
+                              <span className="font-medium text-stone-900">
+                                {targetMember ? targetMember.name : sId}
+                              </span>
+                              {targetMember?.deathDate && (
+                                <span className="text-[10px] text-stone-500 bg-stone-100 px-1 rounded">
+                                  Almarhum/ah
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedSpouseIds(selectedSpouseIds.filter((id) => id !== sId));
+                              }}
+                              className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 text-xs font-semibold cursor-pointer"
+                            >
+                              Hapus Pasangan
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-stone-400 italic mb-2">
+                      Belum ada pasangan yang ditambahkan.
+                    </p>
+                  )}
+
+                  {/* Dropdown to add another spouse */}
+                  <div className="flex items-center gap-2">
+                    <select
+                      id="addSpouseSelect"
+                      defaultValue=""
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val && !selectedSpouseIds.includes(val)) {
+                          setSelectedSpouseIds([...selectedSpouseIds, val]);
+                        }
+                        e.target.value = '';
+                      }}
+                      className="flex-1 p-2 bg-white border border-stone-300 rounded-lg text-stone-900 text-xs"
+                    >
+                      <option value="">+ Tambah Pasangan dari Daftar Anggota...</option>
+                      {members
+                        .filter(
+                          (m) =>
+                            m.id !== memberFormData.id &&
+                            !selectedSpouseIds.includes(m.id)
+                        )
+                        .map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name} ({m.gender} {m.birthDate ? `· Thn ${m.birthDate.split('-')[0]}` : ''})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-xs">
+                <label className="block font-semibold text-stone-700 mb-1">Alamat Domisili</label>
+                <input
+                  type="text"
+                  value={memberFormData.address || ''}
+                  onChange={(e) => setMemberFormData({ ...memberFormData, address: e.target.value })}
+                  placeholder="Jl. Dharmawangsa No. 24, Surabaya"
+                  className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                />
+              </div>
+
+              <div className="text-xs">
+                <label className="block font-semibold text-stone-700 mb-1">Biografi Singkat</label>
+                <textarea
+                  rows={3}
+                  value={memberFormData.bio || ''}
+                  onChange={(e) => setMemberFormData({ ...memberFormData, bio: e.target.value })}
+                  placeholder="Catatan kehidupan, profesi, peran dalam keluarga..."
+                  className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                />
+              </div>
+
+              <div className="text-xs">
+                <label className="block font-semibold text-stone-700 mb-1">Foto Anggota (Upload File atau URL)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+                  className="block w-full text-xs text-stone-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-stone-200 file:text-stone-800 hover:file:bg-stone-300 mb-1"
+                />
+                <input
+                  type="text"
+                  value={memberFormData.photoURL || ''}
+                  onChange={(e) => setMemberFormData({ ...memberFormData, photoURL: e.target.value })}
+                  placeholder="Atau tautan URL foto langsung (https://...)"
+                  className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-stone-100">
+                <button
+                  type="button"
+                  onClick={() => setIsMemberModalOpen(false)}
+                  className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-xs font-semibold cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingMember}
+                  className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingMember ? 'Menyimpan...' : 'Simpan Data Anggota'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Event Form Modal */}
+      {isEventModalOpen && (
+        <div 
+          onClick={() => setIsEventModalOpen(false)}
+          className="fixed inset-0 z-50 flex items-start justify-center p-2 sm:p-4 md:p-6 bg-stone-900/60 backdrop-blur-xs overflow-y-auto"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl shadow-xl border border-stone-200 w-full max-w-lg overflow-hidden my-2 sm:my-6 relative shrink-0"
+          >
+            <div className="p-5 bg-stone-900 text-white flex items-center justify-between">
+              <h3 className="font-bold text-base">
+                {editingEvent ? 'Sunting Acara' : 'Tambah Acara Silaturahmi'}
+              </h3>
+              <button
+                onClick={() => setIsEventModalOpen(false)}
+                className="text-stone-400 hover:text-white"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEvent} className="p-6 space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-stone-700 mb-1">Nama Acara *</label>
+                <input
+                  type="text"
+                  value={eventFormData.namaAcara || ''}
+                  onChange={(e) => setEventFormData({ ...eventFormData, namaAcara: e.target.value })}
+                  required
+                  placeholder="Halal Bihalal & Haul Akbar"
+                  className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-stone-700 mb-1">Waktu & Tanggal *</label>
+                <input
+                  type="datetime-local"
+                  value={eventFormData.tanggal || ''}
+                  onChange={(e) => setEventFormData({ ...eventFormData, tanggal: e.target.value })}
+                  required
+                  className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-stone-700 mb-1">Tempat / Lokasi *</label>
+                <input
+                  type="text"
+                  value={eventFormData.tempat || ''}
+                  onChange={(e) => setEventFormData({ ...eventFormData, tempat: e.target.value })}
+                  required
+                  placeholder="Gedung Graha Kencana, Surabaya"
+                  className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-stone-700 mb-1">Rincian Deskripsi</label>
+                <textarea
+                  rows={3}
+                  value={eventFormData.deskripsi || ''}
+                  onChange={(e) => setEventFormData({ ...eventFormData, deskripsi: e.target.value })}
+                  placeholder="Agenda dan informasi bagi anggota keluarga..."
+                  className="w-full p-2 bg-stone-50 border border-stone-300 rounded-lg text-stone-900"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-stone-100">
+                <button
+                  type="button"
+                  onClick={() => setIsEventModalOpen(false)}
+                  className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-xs font-semibold cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-semibold cursor-pointer"
+                >
+                  Simpan Acara
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Member Confirmation Modal */}
+      {memberToDelete && (
+        <div 
+          onClick={() => !isDeletingMember && setMemberToDelete(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-xs animate-in fade-in duration-150"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl shadow-2xl border border-stone-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150"
+          >
+            <div className="p-6 text-center space-y-4">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-red-100 text-red-600 flex items-center justify-center shadow-inner">
+                <Trash2 className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-lg font-bold font-serif-heritage text-stone-900">
+                  Konfirmasi Hapus Anggota
+                </h3>
+                <p className="text-sm font-medium text-stone-700 leading-relaxed">
+                  Apakah yakin akan menghapus <span className="font-bold text-red-700 underline underline-offset-2">&quot;{memberToDelete.name}&quot;</span> ?
+                </p>
+              </div>
+
+              <div className="bg-stone-50 border border-stone-200 rounded-xl p-3 text-left text-xs text-stone-600 space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <span className="text-stone-400">ID Anggota:</span>
+                  <span className="font-mono font-semibold text-stone-800">{memberToDelete.id}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-stone-400">Jenis Kelamin:</span>
+                  <span className="font-medium text-stone-800">{getGenderDisplay(memberToDelete.gender)}</span>
+                </div>
+                {memberToDelete.birthDate && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-stone-400">Tanggal Lahir:</span>
+                    <span className="text-stone-800">{memberToDelete.birthDate}</span>
+                  </div>
+                )}
+                <div className="pt-2 border-t border-stone-200 text-[11px] text-red-600 flex items-start gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>Data yang dihapus tidak dapat dipulihkan dari basis data silsilah.</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingMember}
+                  onClick={() => setMemberToDelete(null)}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-stone-100 hover:bg-stone-200 text-stone-700 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingMember}
+                  onClick={handleConfirmDeleteMember}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-700 text-white flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isDeletingMember ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Menghapus...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Ya, Hapus Anggota</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Event Confirmation Modal */}
+      {eventToDelete && (
+        <div 
+          onClick={() => !isDeletingEvent && setEventToDelete(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-xs animate-in fade-in duration-150"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl shadow-2xl border border-stone-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150"
+          >
+            <div className="p-6 text-center space-y-4">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-red-100 text-red-600 flex items-center justify-center shadow-inner">
+                <Trash2 className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-lg font-bold font-serif-heritage text-stone-900">
+                  Konfirmasi Hapus Acara
+                </h3>
+                <p className="text-sm font-medium text-stone-700 leading-relaxed">
+                  Apakah yakin akan menghapus acara <span className="font-bold text-red-700">&quot;{eventToDelete.namaAcara}&quot;</span>?
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingEvent}
+                  onClick={() => setEventToDelete(null)}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-stone-100 hover:bg-stone-200 text-stone-700 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingEvent}
+                  onClick={handleConfirmDeleteEvent}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-700 text-white flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isDeletingEvent ? 'Menghapus...' : 'Ya, Hapus Acara'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Seed Lineage Confirmation Modal */}
+      {isSeedModalOpen && (
+        <div 
+          onClick={() => !isSeeding && setIsSeedModalOpen(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-xs animate-in fade-in duration-150"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl shadow-2xl border border-stone-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150"
+          >
+            <div className="p-6 text-center space-y-4">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center shadow-inner">
+                <Sparkles className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-lg font-bold font-serif-heritage text-stone-900">
+                  Inisialisasi Data Silsilah
+                </h3>
+                <p className="text-sm text-stone-600 leading-relaxed">
+                  Muat data awal silsilah Bani Nali (4 Generasi) ke Firestore?
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isSeeding}
+                  onClick={() => setIsSeedModalOpen(false)}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-stone-100 hover:bg-stone-200 text-stone-700 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isSeeding}
+                  onClick={handleConfirmSeedLineage}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-amber-800 hover:bg-amber-900 text-white flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isSeeding ? 'Memuat Data...' : 'Ya, Muat Data'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
