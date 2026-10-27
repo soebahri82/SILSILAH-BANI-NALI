@@ -30,6 +30,11 @@ export const DashboardPage: React.FC = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
 
+  // Admin Direct Edit Redirection State
+  const [adminInitialTab, setAdminInitialTab] = useState<'members' | 'events' | 'users' | 'migration'>('members');
+  const [memberToEdit, setMemberToEdit] = useState<FamilyMember | null>(null);
+  const [eventToEdit, setEventToEdit] = useState<FamilyEvent | null>(null);
+
   // Modal Profile State
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
   const [highlightedTreeMemberId, setHighlightedTreeMemberId] = useState<string | null>(null);
@@ -40,6 +45,36 @@ export const DashboardPage: React.FC = () => {
 
   // Mobile drawer state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Handlers to jump directly to Edit Member or Edit Event in Admin Panel
+  const handleEditMemberFromAnywhere = (member: FamilyMember) => {
+    setSelectedMember(null);
+    setMemberToEdit(member);
+    setEventToEdit(null);
+    setAdminInitialTab('members');
+    setCurrentTab('admin');
+  };
+
+  const handleEditEventFromAnywhere = (event: FamilyEvent) => {
+    setEventToEdit(event);
+    setMemberToEdit(null);
+    setAdminInitialTab('events');
+    setCurrentTab('admin');
+  };
+
+  const handleAddMemberFromAnywhere = () => {
+    setMemberToEdit(null);
+    setEventToEdit(null);
+    setAdminInitialTab('members');
+    setCurrentTab('admin');
+  };
+
+  const handleAddEventFromAnywhere = () => {
+    setEventToEdit(null);
+    setMemberToEdit(null);
+    setAdminInitialTab('events');
+    setCurrentTab('admin');
+  };
 
   const handleConfirmDeleteMember = async () => {
     if (!memberToDelete) return;
@@ -246,7 +281,8 @@ export const DashboardPage: React.FC = () => {
                   members={members}
                   isAdmin={isAdmin}
                   onSelectMember={(m) => setSelectedMember(m)}
-                  onAddNewMember={() => setCurrentTab('admin')}
+                  onAddNewMember={handleAddMemberFromAnywhere}
+                  onEditMember={handleEditMemberFromAnywhere}
                 />
               )}
 
@@ -269,8 +305,8 @@ export const DashboardPage: React.FC = () => {
                 <EventsView
                   events={events}
                   isAdmin={isAdmin}
-                  onAddEvent={() => setCurrentTab('admin')}
-                  onEditEvent={() => setCurrentTab('admin')}
+                  onAddEvent={handleAddEventFromAnywhere}
+                  onEditEvent={handleEditEventFromAnywhere}
                 />
               )}
 
@@ -287,6 +323,11 @@ export const DashboardPage: React.FC = () => {
                 <AdminPanel
                   members={members}
                   events={events}
+                  initialTab={adminInitialTab}
+                  initialEditMember={memberToEdit}
+                  initialEditEvent={eventToEdit}
+                  onClearInitialEditMember={() => setMemberToEdit(null)}
+                  onClearInitialEditEvent={() => setEventToEdit(null)}
                   onRefreshData={() => {}}
                   onSelectMember={(m) => setSelectedMember(m)}
                 />
@@ -314,10 +355,7 @@ export const DashboardPage: React.FC = () => {
         onClose={() => setSelectedMember(null)}
         onSelectMember={(m) => setSelectedMember(m)}
         onOpenTreeWithMember={handleOpenTreeWithMember}
-        onEditMember={() => {
-          setSelectedMember(null);
-          setCurrentTab('admin');
-        }}
+        onEditMember={handleEditMemberFromAnywhere}
         onDeleteMember={(m) => setMemberToDelete(m)}
       />
 

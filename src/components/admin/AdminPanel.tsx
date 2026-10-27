@@ -9,8 +9,6 @@ import {
   Trash2, 
   Download, 
   Upload, 
-  Sparkles, 
-  CheckCircle2, 
   AlertTriangle,
   Link,
   UserCheck,
@@ -23,9 +21,7 @@ import {
   addMember, 
   updateMember, 
   deleteMember, 
-  seedInitialBaniNali, 
-  uploadMemberPhoto,
-  standardizeDatabaseRecords 
+  uploadMemberPhoto
 } from '../../services/memberService';
 import { 
   getMemberSpouseIds, 
@@ -45,13 +41,17 @@ import {
 import { 
   addEvent, 
   updateEvent, 
-  deleteEvent, 
-  seedInitialEvents 
+  deleteEvent
 } from '../../services/eventService';
 
 interface AdminPanelProps {
   members: FamilyMember[];
   events: FamilyEvent[];
+  initialTab?: 'members' | 'events' | 'users' | 'migration';
+  initialEditMember?: FamilyMember | null;
+  initialEditEvent?: FamilyEvent | null;
+  onClearInitialEditMember?: () => void;
+  onClearInitialEditEvent?: () => void;
   onRefreshData: () => void;
   onSelectMember: (m: FamilyMember) => void;
 }
@@ -59,10 +59,17 @@ interface AdminPanelProps {
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   members,
   events,
+  initialTab,
+  initialEditMember,
+  initialEditEvent,
+  onClearInitialEditMember,
+  onClearInitialEditEvent,
   onRefreshData,
   onSelectMember,
 }) => {
-  const [activeTab, setActiveTab] = useState<'members' | 'events' | 'users' | 'migration'>('members');
+  const [activeTab, setActiveTab] = useState<'members' | 'events' | 'users' | 'migration'>(
+    initialTab || 'members'
+  );
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -87,7 +94,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   });
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [isSavingMember, setIsSavingMember] = useState(false);
-  const [isStandardizingDb, setIsStandardizingDb] = useState(false);
 
   // Delete Member Confirmation State
   const [memberToDelete, setMemberToDelete] = useState<FamilyMember | null>(null);
@@ -106,10 +112,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Delete Event Confirmation State
   const [eventToDelete, setEventToDelete] = useState<FamilyEvent | null>(null);
   const [isDeletingEvent, setIsDeletingEvent] = useState(false);
-
-  // Seed Initial Lineage Confirmation State
-  const [isSeedModalOpen, setIsSeedModalOpen] = useState(false);
-  const [isSeeding, setIsSeeding] = useState(false);
 
   // Load Users from Firestore
   const loadUsers = async () => {
@@ -174,6 +176,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setPhotoFile(null);
     setIsMemberModalOpen(true);
   };
+
+  // Directly open Edit Member Modal if requested from MemberProfileModal or Directory
+  useEffect(() => {
+    if (initialEditMember) {
+      setActiveTab('members');
+      handleOpenMemberModal(initialEditMember);
+      if (onClearInitialEditMember) {
+        onClearInitialEditMember();
+      }
+    }
+  }, [initialEditMember]);
+
+  // Directly open Edit Event Modal if requested from EventsView
+  useEffect(() => {
+    if (initialEditEvent) {
+      setActiveTab('events');
+      setEditingEvent(initialEditEvent);
+      setEventFormData({
+        namaAcara: initialEditEvent.namaAcara || '',
+        tanggal: initialEditEvent.tanggal || '',
+        tempat: initialEditEvent.tempat || '',
+        deskripsi: initialEditEvent.deskripsi || '',
+      });
+      setIsEventModalOpen(true);
+      if (onClearInitialEditEvent) {
+        onClearInitialEditEvent();
+      }
+    }
+  }, [initialEditEvent]);
+
+  // Sync activeTab when initialTab changes
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Save Member
   const handleSaveMember = async (e: React.FormEvent) => {
@@ -328,22 +366,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Seed Initial Lineage Modal Handler
-  const handleConfirmSeedLineage = async () => {
-    setIsSeeding(true);
-    try {
-      const count = await seedInitialBaniNali();
-      await seedInitialEvents();
-      setStatusMessage({ type: 'success', text: `Berhasil memuat ${count} anggota silsilah Bani Nali ke Firestore!` });
-      setIsSeedModalOpen(false);
-      onRefreshData();
-    } catch (err: unknown) {
-      setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : 'Gagal memuat data awal.' });
-    } finally {
-      setIsSeeding(false);
-    }
-  };
-
   // Export JSON
   const handleExportJSON = () => {
     const backupData = {
@@ -359,26 +381,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     a.download = `BaniNali_Backup_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  };
-
-  // Standarisasi Database Firestore (L = Laki-laki, P = Perempuan, Privasi = family)
-  const handleStandardizeDatabase = async () => {
-    setIsStandardizingDb(true);
-    try {
-      const updatedCount = await standardizeDatabaseRecords();
-      setStatusMessage({
-        type: 'success',
-        text: `Standarisasi selesai! ${updatedCount} data berhasil diperbarui ke format standar (L/P dan Privasi family).`,
-      });
-      onRefreshData();
-    } catch (err: unknown) {
-      setStatusMessage({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Gagal standarisasi database.',
-      });
-    } finally {
-      setIsStandardizingDb(false);
-    }
   };
 
   // Export CSV Members
@@ -811,55 +813,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Box 1: Seeder Cepat */}
-            <div className="p-5 rounded-xl border border-amber-200 bg-amber-50/50 space-y-3">
-              <div className="flex items-center gap-2 text-amber-900 font-semibold text-sm">
-                <Sparkles className="w-4 h-4 text-amber-700" />
-                <span>Inisialisasi Silsilah Bani Nali</span>
+            {/* Box 1: Ekspor Data (Backup) */}
+            <div className="p-5 rounded-xl border border-stone-200 bg-stone-50 space-y-3 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-stone-900 font-semibold text-sm">
+                  <Download className="w-4 h-4 text-emerald-800" />
+                  <span>Ekspor Data (Backup)</span>
+                </div>
+                <p className="text-xs text-stone-600 leading-relaxed">
+                  Unduh seluruh data anggota silsilah dan acara dalam format standar tanpa menyertakan kredensial pengguna.
+                </p>
               </div>
-              <p className="text-xs text-amber-900/80 leading-relaxed">
-                Muat data lengkap 4 generasi Bani Nali (K.H. Nali & Hj. Fatimah, 3 anak, 8 cucu, dan 5 cicit) 
-                langsung ke database Cloud Firestore untuk memulai silsilah.
-              </p>
-              <button
-                type="button"
-                onClick={() => setIsSeedModalOpen(true)}
-                className="w-full py-2.5 px-4 bg-amber-800 hover:bg-amber-900 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-              >
-                Muat Data Awal Bani Nali (Seeder)
-              </button>
-            </div>
-
-            {/* Box: Standarisasi Format Database */}
-            <div className="p-5 rounded-xl border border-emerald-200 bg-emerald-50/50 space-y-3">
-              <div className="flex items-center gap-2 text-emerald-900 font-semibold text-sm">
-                <ShieldCheck className="w-4 h-4 text-emerald-700" />
-                <span>Standarisasi Format Database (L/P & family)</span>
-              </div>
-              <p className="text-xs text-emerald-950/80 leading-relaxed">
-                Sesuaikan seluruh record anggota di Cloud Firestore: jenis kelamin menjadi <strong>L</strong> (Laki-laki) atau <strong>P</strong> (Perempuan), 
-                dan tingkat privasi menjadi <strong>family</strong>.
-              </p>
-              <button
-                type="button"
-                disabled={isStandardizingDb}
-                onClick={handleStandardizeDatabase}
-                className="w-full py-2.5 px-4 bg-emerald-800 hover:bg-emerald-900 disabled:bg-emerald-400 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-              >
-                {isStandardizingDb ? 'Memproses Standarisasi...' : 'Jalankan Standarisasi Database Sekarang'}
-              </button>
-            </div>
-
-            {/* Box 2: Ekspor Data */}
-            <div className="p-5 rounded-xl border border-stone-200 bg-stone-50 space-y-3">
-              <div className="flex items-center gap-2 text-stone-900 font-semibold text-sm">
-                <Download className="w-4 h-4 text-emerald-800" />
-                <span>Ekspor Data (Backup)</span>
-              </div>
-              <p className="text-xs text-stone-600 leading-relaxed">
-                Unduh seluruh data anggota silsilah dan acara dalam format standar tanpa menyertakan kredensial pengguna.
-              </p>
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-2">
                 <button
                   type="button"
                   onClick={handleExportCSV}
@@ -877,22 +842,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             </div>
 
-            {/* Box 3: Impor CSV / JSON */}
-            <div className="p-5 rounded-xl border border-stone-200 bg-stone-50 space-y-3 md:col-span-2">
-              <div className="flex items-center gap-2 text-stone-900 font-semibold text-sm">
-                <Upload className="w-4 h-4 text-emerald-800" />
-                <span>Impor File CSV / JSON dari Google Sheets Lama</span>
+            {/* Box 2: Impor CSV / JSON */}
+            <div className="p-5 rounded-xl border border-stone-200 bg-stone-50 space-y-3 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-stone-900 font-semibold text-sm">
+                  <Upload className="w-4 h-4 text-emerald-800" />
+                  <span>Impor File CSV / JSON</span>
+                </div>
+                <p className="text-xs text-stone-600 leading-relaxed">
+                  Pilih file CSV atau JSON hasil ekspor Google Sheets. Kolom yang dibaca: 
+                  <code className="text-[11px] block mt-1 bg-stone-200/60 p-1.5 rounded font-mono text-stone-700 break-words">ID, Name, BirthDate, DeathDate, Gender, PhotoURL, ParentID, SpouseID, Bio, BirthPlace, Address, Phone, Privacy</code>
+                </p>
               </div>
-              <p className="text-xs text-stone-600 leading-relaxed">
-                Pilih file CSV atau JSON hasil ekspor Google Sheets. Kolom yang dibaca: 
-                <code>ID, Name, BirthDate, DeathDate, Gender, PhotoURL, ParentID, SpouseID, Bio, BirthPlace, Address, Phone, Privacy</code>.
-              </p>
-              <input
-                type="file"
-                accept=".csv, .json"
-                onChange={handleImportFile}
-                className="block w-full text-xs text-stone-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-800 file:text-white hover:file:bg-emerald-900 cursor-pointer"
-              />
+              <div className="pt-2">
+                <input
+                  type="file"
+                  accept=".csv, .json"
+                  onChange={handleImportFile}
+                  className="block w-full text-xs text-stone-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-800 file:text-white hover:file:bg-emerald-900 cursor-pointer"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -1450,53 +1419,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-700 text-white flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {isDeletingEvent ? 'Menghapus...' : 'Ya, Hapus Acara'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Seed Lineage Confirmation Modal */}
-      {isSeedModalOpen && (
-        <div 
-          onClick={() => !isSeeding && setIsSeedModalOpen(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-xs animate-in fade-in duration-150"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-2xl shadow-2xl border border-stone-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150"
-          >
-            <div className="p-6 text-center space-y-4">
-              <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center shadow-inner">
-                <Sparkles className="w-7 h-7" />
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="text-lg font-bold font-serif-heritage text-stone-900">
-                  Inisialisasi Data Silsilah
-                </h3>
-                <p className="text-sm text-stone-600 leading-relaxed">
-                  Muat data awal silsilah Bani Nali (4 Generasi) ke Firestore?
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <button
-                  type="button"
-                  disabled={isSeeding}
-                  onClick={() => setIsSeedModalOpen(false)}
-                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-stone-100 hover:bg-stone-200 text-stone-700 transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  Batal
-                </button>
-                <button
-                  type="button"
-                  disabled={isSeeding}
-                  onClick={handleConfirmSeedLineage}
-                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-amber-800 hover:bg-amber-900 text-white flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  {isSeeding ? 'Memuat Data...' : 'Ya, Muat Data'}
                 </button>
               </div>
             </div>

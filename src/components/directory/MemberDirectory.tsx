@@ -12,7 +12,8 @@ import {
   ChevronRight,
   ShieldAlert,
   Lock,
-  Heart
+  Heart,
+  Edit3
 } from 'lucide-react';
 import { FamilyMember } from '../../types';
 import { getMemberSpouses } from '../../utils/familyTreeUtils';
@@ -23,6 +24,7 @@ interface MemberDirectoryProps {
   isAdmin: boolean;
   onSelectMember: (m: FamilyMember) => void;
   onAddNewMember?: () => void;
+  onEditMember?: (m: FamilyMember) => void;
 }
 
 export const MemberDirectory: React.FC<MemberDirectoryProps> = ({
@@ -30,6 +32,7 @@ export const MemberDirectory: React.FC<MemberDirectoryProps> = ({
   isAdmin,
   onSelectMember,
   onAddNewMember,
+  onEditMember,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [genderFilter, setGenderFilter] = useState<'all' | 'L' | 'P'>('all');
@@ -367,8 +370,23 @@ export const MemberDirectory: React.FC<MemberDirectoryProps> = ({
                         </span>
                       )}
                     </td>
-                    <td className="py-3 px-4 text-right font-medium text-emerald-800">
-                      Detail &rarr;
+                    <td className="py-3 px-4 text-right font-medium">
+                      <div className="flex items-center justify-end gap-2">
+                        {isAdmin && onEditMember && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditMember(member);
+                            }}
+                            className="p-1 rounded-md hover:bg-stone-200 text-stone-600 hover:text-emerald-800 transition-colors"
+                            title="Sunting Data Anggota"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <span className="text-emerald-800 group-hover:underline">Detail &rarr;</span>
+                      </div>
                     </td>
                   </tr>
                 ))}
