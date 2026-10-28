@@ -4,7 +4,6 @@ import {
   Mail, 
   Eye, 
   EyeOff, 
-  ShieldCheck, 
   ArrowRight, 
   Sparkles, 
   UserPlus, 
@@ -87,20 +86,30 @@ export const LoginPage: React.FC = () => {
       {/* Main Form Center */}
       <main className="flex-1 flex items-center justify-center p-4 sm:p-6 md:p-8">
         <div className="w-full max-w-md">
-          {/* Brand & Crest Header */}
+          {/* Brand & Crest Header with Official Logo */}
           <div className="text-center mb-6">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-linear-to-br from-emerald-950 via-emerald-900 to-stone-900 text-amber-400 shadow-lg mb-3 ring-4 ring-amber-100/80">
-              <ShieldCheck className="w-8 h-8" />
+            <div className="relative inline-block mb-3 group">
+              <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-200 to-emerald-400 opacity-60 blur-xs group-hover:opacity-100 transition-opacity duration-500" />
+              <div className="relative p-1 bg-gradient-to-b from-amber-100 via-white to-amber-200 rounded-2xl shadow-xl border border-amber-300">
+                <img
+                  src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
+                  alt="Logo Resmi Silsilah Bani Nali"
+                  className="w-24 h-24 sm:w-28 sm:h-28 object-contain rounded-xl bg-white p-1"
+                />
+              </div>
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-semibold tracking-wide text-stone-900 font-serif-heritage">
               BANI NALI
             </h1>
             <p className="mt-1 text-xs sm:text-sm font-semibold tracking-widest uppercase text-amber-800">
-              Family Heritage & Genealogy
+              Lamongan · Family Heritage &amp; Genealogy
             </p>
-            <p className="mt-1.5 text-xs text-stone-600 max-w-xs mx-auto">
-              Portal silsilah keluarga, arsip sejarah, dan temu ukhuwah antargenerasi.
+            <p className="mt-1 text-xs text-stone-600 max-w-xs mx-auto italic font-serif">
+              "Kenali keluarga - Jaga Silaturahmi"
+            </p>
+            <p className="mt-1 text-[11px] text-stone-500 max-w-xs mx-auto">
+              Portal resmi silsilah keluarga, arsip sejarah, dan temu ukhuwah antargenerasi.
             </p>
           </div>
 

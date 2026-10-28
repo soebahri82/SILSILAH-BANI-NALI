@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { 
-  ShieldCheck, 
   Search, 
   LogOut, 
   User, 
@@ -54,18 +53,27 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             {/* Brand Logo & Title */}
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-linear-to-br from-emerald-950 via-emerald-900 to-stone-900 text-amber-400 flex items-center justify-center shadow-xs ring-1 ring-amber-400/30">
-                <ShieldCheck className="w-5 h-5 sm:w-6 sm:h-6" />
+            <div className="flex items-center gap-2.5 sm:gap-3">
+              <div className="relative group shrink-0">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white p-0.5 shadow-sm border border-amber-300/70 ring-1 ring-amber-400/30 flex items-center justify-center overflow-hidden transition-all duration-300 group-hover:shadow-md group-hover:scale-105">
+                  <img
+                    src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
+                    alt="Logo Silsilah Bani Nali"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
               </div>
               <div className="hidden xs:block">
-                <div className="flex items-baseline gap-2">
-                  <span className="font-serif-heritage text-base sm:text-xl font-bold tracking-wider text-stone-900">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <span className="font-serif-heritage text-base sm:text-xl font-bold tracking-wider text-stone-900 leading-none">
                     BANI NALI
                   </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 font-semibold border border-amber-200/80 hidden sm:inline-block leading-none">
+                    Lamongan
+                  </span>
                 </div>
-                <p className="text-[10px] sm:text-xs font-semibold tracking-widest text-amber-800 uppercase">
-                  Family Heritage & Genealogy
+                <p className="text-[9.5px] sm:text-[11px] font-semibold tracking-widest text-amber-800 uppercase mt-0.5">
+                  Family Heritage &amp; Genealogy
                 </p>
               </div>
             </div>

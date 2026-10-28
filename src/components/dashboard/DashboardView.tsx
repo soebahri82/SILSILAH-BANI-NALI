@@ -129,50 +129,87 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
 
-          {/* Center: Title & Description */}
-          <div className="max-w-2xl my-auto">
-            <div className="inline-block text-[11px] sm:text-xs uppercase tracking-widest text-amber-400 font-semibold mb-1 drop-shadow-xs">
-              Dokumentasi &amp; Silsilah Trah
-            </div>
+          {/* Center: Title, Official Logo, Description & Quick Actions */}
+          <div className="max-w-4xl my-auto">
+            <div className="flex flex-col md:flex-row md:items-center gap-5 sm:gap-6 lg:gap-8">
+              {/* Desktop / Tablet Logo Badge with Dynamic Glassmorphic Ring */}
+              <div className="shrink-0 hidden sm:flex items-center justify-center">
+                <div className="relative group/logo">
+                  <div className="absolute -inset-1 rounded-2xl bg-gradient-to-tr from-amber-400/40 via-amber-200/20 to-emerald-400/30 blur-sm group-hover/logo:blur-md transition-all duration-500" />
+                  <div className="relative p-1.5 bg-stone-900/80 backdrop-blur-md rounded-2xl shadow-xl border border-amber-400/40 group-hover/logo:border-amber-300 transition-all duration-300">
+                    <img
+                      src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
+                      alt="Logo Silsilah Bani Nali"
+                      className="w-20 h-20 md:w-24 md:h-24 lg:w-28 lg:h-28 object-contain rounded-xl bg-[#FFFDF8] p-1 shadow-inner group-hover/logo:scale-103 transition-transform duration-300"
+                    />
+                  </div>
+                </div>
+              </div>
 
-            <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-serif-heritage font-bold text-white tracking-wide leading-tight drop-shadow-md">
-              BANI NALI
-            </h1>
-            <p className="text-xs sm:text-sm md:text-base font-serif-heritage italic text-amber-200/90 tracking-wider mt-0.5 mb-3 drop-shadow-xs">
-              Family Heritage &amp; Genealogy
-            </p>
+              <div className="flex-1">
+                {/* Mobile Header with Logo */}
+                <div className="sm:hidden flex items-center gap-3 mb-2">
+                  <div className="p-1 bg-stone-900/80 backdrop-blur-md rounded-xl border border-amber-400/40 shrink-0">
+                    <img
+                      src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
+                      alt="Logo Bani Nali"
+                      className="w-12 h-12 object-contain rounded-lg bg-white p-0.5"
+                    />
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-400 font-semibold drop-shadow-xs">
+                      Dokumentasi &amp; Silsilah Trah
+                    </div>
+                    <div className="text-[11px] text-amber-200 font-serif italic">
+                      Lamongan, Jawa Timur
+                    </div>
+                  </div>
+                </div>
 
-            <p className="text-xs sm:text-sm md:text-base text-stone-200 leading-relaxed max-w-xl text-shadow-sm backdrop-blur-xs sm:backdrop-blur-none bg-stone-950/35 sm:bg-transparent p-3 sm:p-0 rounded-xl sm:rounded-none border border-white/10 sm:border-0">
-              Selamat datang, <strong className="text-white font-medium">{user.displayName || user.email}</strong>. 
-              Dokumentasi terpadu silsilah keluarga besar Bani Nali untuk mengenal leluhur, 
-              merawat garis keturunan, serta mempererat silaturahmi antargenerasi.
-            </p>
+                <div className="hidden sm:inline-block text-[11px] sm:text-xs uppercase tracking-widest text-amber-400 font-semibold mb-1 drop-shadow-xs">
+                  Dokumentasi &amp; Silsilah Trah · Lamongan
+                </div>
 
-            {/* Quick Action Buttons */}
-            <div className="mt-5 sm:mt-6 flex flex-wrap items-center gap-3">
-              <button
-                onClick={() => onNavigateTab('tree')}
-                className="px-4 sm:px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-semibold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer hover:shadow-lg active:scale-98"
-              >
-                <GitBranch className="w-4 h-4" />
-                <span>Buka Pohon Silsilah</span>
-              </button>
+                <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-serif-heritage font-bold text-white tracking-wide leading-tight drop-shadow-md">
+                  BANI NALI
+                </h1>
+                <p className="text-xs sm:text-sm md:text-base font-serif-heritage italic text-amber-200/95 tracking-wider mt-0.5 mb-2.5 drop-shadow-xs">
+                  Kenali Keluarga — Jaga Silaturahmi
+                </p>
 
-              <button
-                onClick={() => onNavigateTab('relationship')}
-                className="px-4 sm:px-5 py-2.5 bg-stone-900/80 hover:bg-stone-900 text-white font-semibold text-xs sm:text-sm rounded-xl border border-white/20 hover:border-amber-400/40 backdrop-blur-md transition-all flex items-center gap-2 cursor-pointer active:scale-98 shadow-sm"
-              >
-                <HeartHandshake className="w-4 h-4 text-amber-400" />
-                <span>Kalkulator Kekerabatan</span>
-              </button>
+                <p className="text-xs sm:text-sm text-stone-200 leading-relaxed max-w-xl text-shadow-sm backdrop-blur-xs sm:backdrop-blur-none bg-stone-950/35 sm:bg-transparent p-3 sm:p-0 rounded-xl sm:rounded-none border border-white/10 sm:border-0">
+                  Selamat datang, <strong className="text-white font-medium">{user.displayName || user.email}</strong>. 
+                  Dokumentasi terpadu silsilah keluarga besar Bani Nali untuk mengenal leluhur, 
+                  merawat garis keturunan, serta mempererat silaturahmi antargenerasi.
+                </p>
 
-              <button
-                onClick={() => onNavigateTab('gallery')}
-                className="px-4 sm:px-5 py-2.5 bg-emerald-900/80 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm rounded-xl border border-emerald-400/30 hover:border-emerald-400/60 backdrop-blur-md transition-all flex items-center gap-2 cursor-pointer active:scale-98 shadow-sm"
-              >
-                <ImageIcon className="w-4 h-4 text-emerald-300" />
-                <span>Album Foto</span>
-              </button>
+                {/* Quick Action Buttons */}
+                <div className="mt-5 sm:mt-6 flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => onNavigateTab('tree')}
+                    className="px-4 sm:px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-semibold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer hover:shadow-lg active:scale-98"
+                  >
+                    <GitBranch className="w-4 h-4" />
+                    <span>Buka Pohon Silsilah</span>
+                  </button>
+
+                  <button
+                    onClick={() => onNavigateTab('relationship')}
+                    className="px-4 sm:px-5 py-2.5 bg-stone-900/80 hover:bg-stone-900 text-white font-semibold text-xs sm:text-sm rounded-xl border border-white/20 hover:border-amber-400/40 backdrop-blur-md transition-all flex items-center gap-2 cursor-pointer active:scale-98 shadow-sm"
+                  >
+                    <HeartHandshake className="w-4 h-4 text-amber-400" />
+                    <span>Kalkulator Kekerabatan</span>
+                  </button>
+
+                  <button
+                    onClick={() => onNavigateTab('gallery')}
+                    className="px-4 sm:px-5 py-2.5 bg-emerald-900/80 hover:bg-emerald-800 text-white font-semibold text-xs sm:text-sm rounded-xl border border-emerald-400/30 hover:border-emerald-400/60 backdrop-blur-md transition-all flex items-center gap-2 cursor-pointer active:scale-98 shadow-sm"
+                  >
+                    <ImageIcon className="w-4 h-4 text-emerald-300" />
+                    <span>Album Foto</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 

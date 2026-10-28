@@ -1344,10 +1344,22 @@ export const PrintExportFamilyTreeModal: React.FC<PrintExportFamilyTreeModalProp
                       <div className="w-16 h-0.5" style={{ backgroundColor: '#92400E', opacity: 0.6 }} />
                       <span className="text-xl">⚜</span>
                       <span className="text-xs tracking-widest uppercase font-serif font-semibold" style={{ color: '#78350F' }}>
-                        Nasab & Silaturahmi Trah Agung
+                        Nasab &amp; Silaturahmi Trah Agung
                       </span>
                       <span className="text-xl">⚜</span>
                       <div className="w-16 h-0.5" style={{ backgroundColor: '#92400E', opacity: 0.6 }} />
+                    </div>
+
+                    {/* Official Heritage Logo Crest */}
+                    <div className="my-2.5">
+                      <div className="inline-block p-1 bg-[#FFFDF8] rounded-2xl shadow-sm border border-amber-900/40">
+                        <img
+                          src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
+                          alt="Logo Silsilah Bani Nali"
+                          className="w-20 h-20 sm:w-24 sm:h-24 object-contain"
+                          crossOrigin="anonymous"
+                        />
+                      </div>
                     </div>
 
                     {/* JUDUL RESMI YANG PROPORSIONAL SESUAI PERMINTAAN */}
@@ -1630,18 +1642,24 @@ export const PrintExportFamilyTreeModal: React.FC<PrintExportFamilyTreeModalProp
                     {/* Right: Cap Segel Trah Bani Nali Resmi */}
                     {includeOfficialSeal && (
                       <div className="flex flex-col items-center">
-                        <div className="w-20 h-20 rounded-full border-2 border-dashed border-amber-900/60 p-1 flex items-center justify-center relative">
-                          <div className="w-full h-full rounded-full border border-amber-900/80 flex flex-col items-center justify-center text-center p-1 bg-amber-50/50">
-                            <span className="text-[7.5px] font-serif font-black tracking-wider text-amber-950 uppercase">
+                        <div className="w-22 h-22 rounded-full border-2 border-dashed border-amber-900/60 p-1 flex items-center justify-center relative bg-amber-50/40">
+                          <div className="w-full h-full rounded-full border border-amber-900/80 flex flex-col items-center justify-center text-center p-1 relative overflow-hidden">
+                            <img
+                              src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
+                              alt="Cap Segel"
+                              className="absolute inset-0 w-full h-full object-contain opacity-25 pointer-events-none"
+                              crossOrigin="anonymous"
+                            />
+                            <span className="text-[7.5px] font-serif font-black tracking-wider text-amber-950 uppercase relative z-10">
                               CAP NASAB RESMI
                             </span>
-                            <span className="text-[9px] font-serif font-black text-amber-900">
+                            <span className="text-[9.5px] font-serif font-black text-amber-900 relative z-10">
                               BANI NALI
                             </span>
-                            <span className="text-[6.5px] tracking-tight text-amber-800 uppercase">
+                            <span className="text-[6.5px] tracking-tight text-amber-800 uppercase relative z-10">
                               LAMONGAN
                             </span>
-                            <span className="text-[8px] text-amber-700 mt-0.5">✦ ✦ ✦</span>
+                            <span className="text-[8px] text-amber-700 mt-0.5 relative z-10">✦ ✦ ✦</span>
                           </div>
                         </div>
                         <span className="text-[8px] font-serif font-semibold text-stone-600 mt-1">

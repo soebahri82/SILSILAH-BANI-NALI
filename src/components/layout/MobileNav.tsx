@@ -61,13 +61,22 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           <div className="relative w-72 max-w-xs bg-white h-full p-6 flex flex-col justify-between shadow-2xl z-10 animate-in slide-in-from-left duration-200">
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-stone-100">
-                <div>
-                  <h3 className="font-serif-heritage font-bold text-base text-stone-900">
-                    BANI NALI
-                  </h3>
-                  <p className="text-[10px] uppercase font-semibold text-amber-800">
-                    Family Heritage
-                  </p>
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-white p-0.5 border border-amber-300 shadow-xs shrink-0 flex items-center justify-center overflow-hidden">
+                    <img
+                      src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
+                      alt="Logo Bani Nali"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                  <div>
+                    <h3 className="font-serif-heritage font-bold text-base text-stone-900 leading-tight">
+                      BANI NALI
+                    </h3>
+                    <p className="text-[10px] uppercase font-semibold text-amber-800">
+                      Lamongan · Heritage
+                    </p>
+                  </div>
                 </div>
                 <button
                   onClick={onClose}
