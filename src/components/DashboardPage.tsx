@@ -199,9 +199,20 @@ export const DashboardPage: React.FC = () => {
         {/* Dynamic Tab Views */}
         <main className="flex-1 min-w-0">
           {loadingData ? (
-            <div className="bg-white rounded-2xl border border-stone-200 p-12 text-center text-stone-500 shadow-xs">
-              <div className="inline-block w-8 h-8 border-3 border-emerald-800 border-t-transparent rounded-full animate-spin mb-3" />
-              <h3 className="text-sm font-semibold text-stone-800">
+            <div className="bg-white rounded-2xl border border-stone-200/90 p-10 sm:p-14 text-center text-stone-500 shadow-xs flex flex-col items-center justify-center">
+              <div className="relative mb-4">
+                <div className="w-16 h-16 rounded-2xl bg-white p-1 border border-amber-300 shadow-xs flex items-center justify-center">
+                  <img
+                    src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
+                    alt="Logo Bani Nali"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+                <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-900 border-2 border-white flex items-center justify-center shadow-xs">
+                  <span className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                </div>
+              </div>
+              <h3 className="text-sm font-semibold text-stone-900 font-serif-heritage">
                 Memuat Data Silsilah Bani Nali...
               </h3>
               <p className="text-xs text-stone-400 mt-1">
