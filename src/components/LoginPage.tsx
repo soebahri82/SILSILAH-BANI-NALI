@@ -28,9 +28,39 @@ export const LoginPage: React.FC = () => {
     e.preventDefault();
     setLocalError('');
 
-    if (!email.trim() || !password.trim()) {
-      setLocalError('Silakan lengkapi email dan kata sandi Anda.');
+    // Validasi Kolom Wajib
+    if (tab === 'register') {
+      if (!name.trim()) {
+        setLocalError('Nama lengkap wajib diisi.');
+        return;
+      }
+    }
+
+    if (!email.trim()) {
+      setLocalError('Alamat email wajib diisi.');
       return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setLocalError('Format alamat email tidak valid (contoh: nama@domain.com).');
+      return;
+    }
+
+    if (!password.trim()) {
+      setLocalError('Kata sandi wajib diisi.');
+      return;
+    }
+
+    if (tab === 'register') {
+      if (password.length < 6) {
+        setLocalError('Kata sandi minimal 6 karakter demi keamanan akun.');
+        return;
+      }
+      if (!/(?=.*[a-zA-Z])(?=.*[0-9])/.test(password)) {
+        setLocalError('Kata sandi harus mengandung kombinasi huruf dan angka.');
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -38,11 +68,6 @@ export const LoginPage: React.FC = () => {
       if (tab === 'login') {
         await loginWithEmail(email, password);
       } else {
-        if (!name.trim()) {
-          setLocalError('Silakan masukkan nama lengkap Anda.');
-          setIsLoading(false);
-          return;
-        }
         await registerWithEmail(email, password, name);
       }
     } catch (err: unknown) {
@@ -86,30 +111,40 @@ export const LoginPage: React.FC = () => {
       {/* Main Form Center */}
       <main className="flex-1 flex items-center justify-center p-4 sm:p-6 md:p-8">
         <div className="w-full max-w-md">
-          {/* Brand & Crest Header with Official Logo */}
-          <div className="text-center mb-6">
-            <div className="relative inline-block mb-3 group">
-              <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-200 to-emerald-400 opacity-60 blur-xs group-hover:opacity-100 transition-opacity duration-500" />
-              <div className="relative p-1 bg-gradient-to-b from-amber-100 via-white to-amber-200 rounded-2xl shadow-xl border border-amber-300">
+          {/* Brand & Crest Header with Official Logo - Vintage, Centered & Elegant */}
+          <div className="text-center mb-6 sm:mb-8 flex flex-col items-center">
+            {/* Logo Di Atas */}
+            <div className="relative inline-block mb-3.5 sm:mb-4 group">
+              <div className="absolute -inset-1 sm:-inset-1.5 rounded-3xl bg-gradient-to-tr from-amber-400 via-amber-200 to-emerald-400 opacity-60 blur-xs group-hover:opacity-100 transition-opacity duration-500" />
+              <div className="relative p-1.5 bg-gradient-to-b from-amber-100 via-white to-amber-200 rounded-3xl shadow-xl border-2 border-amber-400/70 ring-1 ring-amber-300/40">
                 <img
                   src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
                   alt="Logo Resmi Silsilah Bani Nali"
-                  className="w-24 h-24 sm:w-28 sm:h-28 object-contain rounded-xl bg-white p-1"
+                  className="w-24 h-24 sm:w-28 sm:h-28 md:w-32 md:h-32 object-contain rounded-2xl bg-[#FFFDF8] p-1.5 shadow-inner"
                 />
               </div>
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-semibold tracking-wide text-stone-900 font-serif-heritage">
-              BANI NALI
+            {/* 1. BANI NALI LAMONGAN */}
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-serif-heritage font-bold tracking-wide text-stone-900 leading-tight">
+              BANI NALI <span className="text-amber-800 font-semibold tracking-wider">LAMONGAN</span>
             </h1>
-            <p className="mt-1 text-xs sm:text-sm font-semibold tracking-widest uppercase text-amber-800">
-              Lamongan · Family Heritage &amp; Genealogy
+
+            {/* Vintage Filigree Accent */}
+            <div className="flex items-center justify-center gap-2 my-1.5 sm:my-2 text-amber-700/70">
+              <span className="w-8 sm:w-12 h-px bg-gradient-to-r from-transparent to-amber-400/80" />
+              <span className="text-[10px] text-amber-600">✦</span>
+              <span className="w-8 sm:w-12 h-px bg-gradient-to-l from-transparent to-amber-400/80" />
+            </div>
+
+            {/* 2. Family Heritage & Genealogy */}
+            <p className="text-xs sm:text-sm font-semibold tracking-[0.2em] sm:tracking-[0.25em] uppercase text-amber-800 font-serif-heritage">
+              Family Heritage &amp; Genealogy
             </p>
-            <p className="mt-1 text-xs text-stone-600 max-w-xs mx-auto italic font-serif">
+
+            {/* 3. "Kenali keluarga - Jaga Silaturahmi" */}
+            <p className="mt-1 text-xs sm:text-sm md:text-base text-stone-600 italic font-serif">
               "Kenali keluarga - Jaga Silaturahmi"
-            </p>
-            <p className="mt-1 text-[11px] text-stone-500 max-w-xs mx-auto">
-              Portal resmi silsilah keluarga, arsip sejarah, dan temu ukhuwah antargenerasi.
             </p>
           </div>
 
@@ -165,7 +200,7 @@ export const LoginPage: React.FC = () => {
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="contoh: Ahmad Fauzi Nali"
+                    placeholder="contoh: Samsu Bahri Nali"
                     className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-800 text-stone-900"
                   />
                 </div>
@@ -212,7 +247,23 @@ export const LoginPage: React.FC = () => {
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                {tab === 'register' && (
+                  <div className="mt-1.5 space-y-1">
+                    <p className="text-[11px] text-stone-500">
+                      • Minimal 6 karakter dengan kombinasi huruf dan angka.
+                    </p>
+                    <p className="text-[11px] text-emerald-800 font-medium">
+                      🛡️ Kata sandi diamankan langsung oleh Firebase Authentication (tidak disimpan dalam teks biasa).
+                    </p>
+                  </div>
+                )}
               </div>
+
+              {tab === 'register' && (
+                <div className="p-3 bg-amber-50/90 border border-amber-200/90 rounded-xl text-[11px] text-amber-900 leading-relaxed">
+                  <span className="font-semibold">Catatan Pendaftaran:</span> Pendaftaran baru memerlukan persetujuan admin. Status awal akun adalah <strong>"Menunggu aktivasi"</strong> demi menjaga privasi dan keabsahan silsilah keluarga Bani Nali.
+                </div>
+              )}
 
               <button
                 type="submit"

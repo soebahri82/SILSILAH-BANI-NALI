@@ -104,20 +104,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const userDocRef = doc(db, 'users', firebaseUser.uid);
     const isDefaultAdmin = ADMIN_EMAILS.includes(firebaseUser.email?.toLowerCase() || '') || forcedRole === 'admin';
     const targetRole = forcedRole || (isDefaultAdmin ? 'admin' : 'member');
+    const targetStatus: import('../types').ActivationStatus = isDefaultAdmin ? 'active' : 'pending';
 
     try {
       const snap = await getDoc(userDocRef);
       if (snap.exists()) {
         const data = snap.data() as UserProfile;
+        const resolvedStatus = data.activationStatus || (data.role === 'admin' || isDefaultAdmin ? 'active' : (data.active ? 'active' : 'pending'));
         if (forcedRole && data.role !== forcedRole) {
           try {
             await updateDoc(userDocRef, { role: forcedRole, updatedAt: new Date().toISOString() });
           } catch (e) {
             console.warn('Update doc role notice:', e);
           }
-          return { ...data, role: forcedRole };
+          return { ...data, role: forcedRole, activationStatus: resolvedStatus };
         }
-        return data;
+        return { ...data, activationStatus: resolvedStatus };
       } else {
         const newProfile: UserProfile = {
           uid: firebaseUser.uid,
@@ -128,7 +130,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             (targetRole === 'admin' ? 'Administrator Bani Nali' : 'Anggota Keluarga Bani Nali'),
           role: targetRole,
           photoURL: firebaseUser.photoURL || undefined,
-          active: true,
+          active: targetStatus === 'active',
+          activationStatus: targetStatus,
+          registeredAt: new Date().toISOString(),
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -147,7 +151,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         email: firebaseUser.email || 'anggota@baninali.id',
         displayName: firebaseUser.displayName || (targetRole === 'admin' ? 'Administrator Bani Nali' : 'Anggota Bani Nali'),
         role: targetRole,
-        active: true,
+        active: targetStatus === 'active',
+        activationStatus: targetStatus,
+        registeredAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -292,44 +298,169 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setError(null);
     setLoading(true);
     const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
+
+    // 1. Validasi Semua Kolom Wajib Diisi
+    if (!cleanName) {
+      const msg = 'Nama lengkap wajib diisi.';
+      setError(msg);
+      setLoading(false);
+      throw new Error(msg);
+    }
+    if (!cleanEmail) {
+      const msg = 'Alamat email wajib diisi.';
+      setError(msg);
+      setLoading(false);
+      throw new Error(msg);
+    }
+    if (!pass) {
+      const msg = 'Kata sandi wajib diisi.';
+      setError(msg);
+      setLoading(false);
+      throw new Error(msg);
+    }
+
+    // 2. Validasi Format Email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      const msg = 'Format alamat email tidak valid.';
+      setError(msg);
+      setLoading(false);
+      throw new Error(msg);
+    }
+
+    // 3. Validasi Aturan Keamanan Password (minimal 6 karakter & kombinasi huruf + angka)
+    if (pass.length < 6) {
+      const msg = 'Kata sandi minimal 6 karakter demi keamanan akun.';
+      setError(msg);
+      setLoading(false);
+      throw new Error(msg);
+    }
+    if (!/(?=.*[a-zA-Z])(?=.*[0-9])/.test(pass)) {
+      const msg = 'Kata sandi harus mengandung kombinasi huruf dan angka.';
+      setError(msg);
+      setLoading(false);
+      throw new Error(msg);
+    }
+
     try {
+      // Buat akun dengan Firebase Authentication (password hanya dikelola Firebase Auth, tidak disimpan di Firestore)
       const cred = await withTimeout(
         createUserWithEmailAndPassword(auth, cleanEmail, pass),
         AUTH_TIMEOUT_MS,
         'auth/network-request-failed'
       );
-      const profile = await fetchOrCreateProfile(cred.user);
-      if (name) {
-        try {
-          await updateDoc(doc(db, 'users', cred.user.uid), { displayName: name });
-        } catch (e) {
-          console.warn('Update display name error:', e);
-        }
-        profile.displayName = name;
+
+      const isDefaultAdmin = ADMIN_EMAILS.includes(cleanEmail);
+      const targetRole: UserRole = isDefaultAdmin ? 'admin' : 'member';
+      const targetStatus: import('../types').ActivationStatus = isDefaultAdmin ? 'active' : 'pending';
+
+      const newProfile: UserProfile = {
+        uid: cred.user.uid,
+        username: cleanEmail.split('@')[0],
+        email: cleanEmail,
+        displayName: cleanName,
+        role: targetRole,
+        active: isDefaultAdmin,
+        activationStatus: targetStatus,
+        registeredAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Simpan data anggota ke Firestore (tanpa field password)
+      try {
+        await setDoc(doc(db, 'users', cred.user.uid), newProfile);
+      } catch (firestoreErr) {
+        console.warn('Error saving new user doc to Firestore:', firestoreErr);
       }
+
+      // Simpan juga ke cache lokal agar sinkronisasi instan
+      try {
+        const storedUsers: UserProfile[] = JSON.parse(localStorage.getItem('baninali_registered_users') || '[]');
+        const existingIdx = storedUsers.findIndex(u => u.uid === newProfile.uid || u.email.toLowerCase() === newProfile.email.toLowerCase());
+        if (existingIdx >= 0) {
+          storedUsers[existingIdx] = newProfile;
+        } else {
+          storedUsers.push(newProfile);
+        }
+        localStorage.setItem('baninali_registered_users', JSON.stringify(storedUsers));
+      } catch (e) {
+        console.warn('Cache local users error:', e);
+      }
+
       setUser(cred.user);
-      setUserProfile(profile);
-      saveLocalSession(cred.user, profile);
+      setUserProfile(newProfile);
+      saveLocalSession(cred.user, newProfile);
     } catch (err: unknown) {
       console.warn('Register encounter or timeout:', err);
-      if (isNetworkTimeoutError(err) || (err as { code?: string })?.code === 'auth/operation-not-allowed') {
+      const errCode = (err as { code?: string })?.code || '';
+
+      if (errCode === 'auth/email-already-in-use') {
+        const msg = 'Email ini sudah terdaftar. Silakan masuk atau gunakan email lain.';
+        setError(msg);
+        throw new Error(msg);
+      }
+      if (errCode === 'auth/weak-password') {
+        const msg = 'Kata sandi terlalu lemah. Gunakan minimal 6 karakter kombinasi huruf dan angka.';
+        setError(msg);
+        throw new Error(msg);
+      }
+      if (errCode === 'auth/invalid-email') {
+        const msg = 'Format alamat email tidak valid.';
+        setError(msg);
+        throw new Error(msg);
+      }
+
+      if (isNetworkTimeoutError(err) || errCode === 'auth/operation-not-allowed') {
         const isDefaultAdmin = ADMIN_EMAILS.includes(cleanEmail);
         const fallbackUid = `user_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
         const fallbackAuthUser: MinimalAuthUser = {
           uid: fallbackUid,
           email: cleanEmail,
-          displayName: name || cleanEmail.split('@')[0],
+          displayName: cleanName,
         };
         const targetRole: UserRole = isDefaultAdmin ? 'admin' : 'member';
-        const profile = await fetchOrCreateProfile(fallbackAuthUser, targetRole);
-        if (name) profile.displayName = name;
+        const targetStatus: import('../types').ActivationStatus = isDefaultAdmin ? 'active' : 'pending';
+        const fallbackProfile: UserProfile = {
+          uid: fallbackUid,
+          username: cleanEmail.split('@')[0],
+          email: cleanEmail,
+          displayName: cleanName,
+          role: targetRole,
+          active: isDefaultAdmin,
+          activationStatus: targetStatus,
+          registeredAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        try {
+          await setDoc(doc(db, 'users', fallbackUid), fallbackProfile);
+        } catch (e) {
+          console.warn('Fallback setDoc error:', e);
+        }
+
+        try {
+          const storedUsers: UserProfile[] = JSON.parse(localStorage.getItem('baninali_registered_users') || '[]');
+          const existingIdx = storedUsers.findIndex(u => u.uid === fallbackProfile.uid || u.email.toLowerCase() === fallbackProfile.email.toLowerCase());
+          if (existingIdx >= 0) {
+            storedUsers[existingIdx] = fallbackProfile;
+          } else {
+            storedUsers.push(fallbackProfile);
+          }
+          localStorage.setItem('baninali_registered_users', JSON.stringify(storedUsers));
+        } catch (e) {}
+
         setUser(fallbackAuthUser);
-        setUserProfile(profile);
-        saveLocalSession(fallbackAuthUser, profile);
+        setUserProfile(fallbackProfile);
+        saveLocalSession(fallbackAuthUser, fallbackProfile);
         return;
       }
-      setError(err instanceof Error ? err.message : 'Pendaftaran gagal.');
-      throw err;
+
+      const msg = err instanceof Error ? err.message : 'Pendaftaran gagal.';
+      setError(msg);
+      throw new Error(msg);
     } finally {
       setLoading(false);
     }
@@ -363,6 +494,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         displayName: targetRole === 'admin' ? 'Administrator Bani Nali (Demo)' : 'Anggota Keluarga (Demo)',
         role: targetRole,
         active: true,
+        activationStatus: 'active',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

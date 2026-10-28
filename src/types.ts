@@ -26,6 +26,8 @@ export interface FamilyMember {
   updatedAt?: string;
 }
 
+export type ActivationStatus = 'pending' | 'active' | 'rejected' | 'disabled';
+
 export interface UserProfile {
   uid: string;
   username?: string;
@@ -35,6 +37,11 @@ export interface UserProfile {
   linkedMemberID?: string;
   photoURL?: string;
   active: boolean;
+  activationStatus: ActivationStatus;
+  registeredAt?: string;
+  decisionAt?: string;
+  decidedBy?: string;
+  rejectionReason?: string;
   createdAt: string;
   updatedAt: string;
 }

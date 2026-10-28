@@ -200,7 +200,7 @@ export const DashboardPage: React.FC = () => {
         <main className="flex-1 min-w-0">
           {loadingData ? (
             <div className="bg-white rounded-2xl border border-stone-200/90 p-10 sm:p-14 text-center text-stone-500 shadow-xs flex flex-col items-center justify-center">
-              <div className="relative mb-4">
+              <div className="relative mb-4 animate-float">
                 <div className="w-16 h-16 rounded-2xl bg-white p-1 border border-amber-300 shadow-xs flex items-center justify-center">
                   <img
                     src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"

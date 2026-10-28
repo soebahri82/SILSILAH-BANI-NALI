@@ -39,6 +39,25 @@
           "type": "boolean",
           "description": "Status keaktifan akun"
         },
+        "activationStatus": {
+          "type": "string",
+          "enum": ["pending", "active", "rejected", "disabled"],
+          "description": "Status persetujuan pendaftaran oleh admin: pending (Menunggu aktivasi), active (Aktif), rejected (Ditolak), disabled (Dinonaktifkan)"
+        },
+        "registeredAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pendaftaran anggota"
+        },
+        "decisionAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu keputusan persetujuan/penolakan oleh admin"
+        },
+        "decidedBy": {
+          "type": "string",
+          "description": "Email atau UID admin yang mengambil keputusan"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",

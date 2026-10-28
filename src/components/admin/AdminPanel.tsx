@@ -12,10 +12,17 @@ import {
   AlertTriangle,
   Link,
   UserCheck,
-  UserX
+  UserX,
+  Clock,
+  Check,
+  X,
+  CheckCircle2,
+  XCircle,
+  RefreshCw
 } from 'lucide-react';
-import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase/config';
+import { useAuth } from '../../context/AuthContext';
 import { FamilyMember, FamilyEvent, UserProfile } from '../../types';
 import { 
   addMember, 
@@ -70,6 +77,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [activeTab, setActiveTab] = useState<'members' | 'events' | 'users' | 'migration'>(
     initialTab || 'members'
   );
+  const { userProfile: currentAdminProfile } = useAuth();
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -114,15 +122,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [isDeletingEvent, setIsDeletingEvent] = useState(false);
 
   // Load Users from Firestore
+  // Load Users from Firestore & local cache
   const loadUsers = async () => {
     setLoadingUsers(true);
     try {
       const snap = await getDocs(collection(db, 'users'));
       const list: UserProfile[] = [];
       snap.forEach((d) => list.push({ ...d.data(), uid: d.id } as UserProfile));
+
+      // Gabungkan dengan cache pendaftaran lokal jika ada
+      try {
+        const localListStr = localStorage.getItem('baninali_registered_users');
+        if (localListStr) {
+          const localList = JSON.parse(localListStr) as UserProfile[];
+          localList.forEach((lu) => {
+            const idx = list.findIndex(
+              (u) => u.uid === lu.uid || u.email.toLowerCase() === lu.email.toLowerCase()
+            );
+            if (idx === -1) {
+              list.push(lu);
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('Merge local users notice:', e);
+      }
+
       setUsersList(list);
     } catch (err) {
       console.error('Error loading users:', err);
+      // Fallback ke cache lokal jika terjadi kegagalan jaringan
+      try {
+        const localListStr = localStorage.getItem('baninali_registered_users');
+        if (localListStr) {
+          setUsersList(JSON.parse(localListStr));
+        }
+      } catch (e) {}
     } finally {
       setLoadingUsers(false);
     }
@@ -131,6 +166,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   useEffect(() => {
     if (activeTab === 'users') {
       loadUsers();
+
+      // Realtime listener agar pendaftar baru langsung muncul tanpa perlu refresh manual
+      let unsubscribe: (() => void) | undefined;
+      try {
+        unsubscribe = onSnapshot(
+          collection(db, 'users'),
+          (snap) => {
+            const list: UserProfile[] = [];
+            snap.forEach((d) => list.push({ ...d.data(), uid: d.id } as UserProfile));
+
+            try {
+              const localListStr = localStorage.getItem('baninali_registered_users');
+              if (localListStr) {
+                const localList = JSON.parse(localListStr) as UserProfile[];
+                localList.forEach((lu) => {
+                  const idx = list.findIndex(
+                    (u) => u.uid === lu.uid || u.email.toLowerCase() === lu.email.toLowerCase()
+                  );
+                  if (idx === -1) {
+                    list.push(lu);
+                  }
+                });
+              }
+            } catch (e) {}
+
+            setUsersList(list);
+            setLoadingUsers(false);
+          },
+          (err) => {
+            console.warn('Realtime users listener notice:', err);
+          }
+        );
+      } catch (listenerErr) {
+        console.warn('Listener error:', listenerErr);
+      }
+
+      return () => {
+        if (unsubscribe) unsubscribe();
+      };
     }
   }, [activeTab]);
 
@@ -352,6 +426,107 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  // Aktifkan pendaftaran akun oleh admin
+  const handleApproveUser = async (targetUser: UserProfile) => {
+    try {
+      const now = new Date().toISOString();
+      const adminIdentifier = currentAdminProfile?.email || 'Admin';
+      await updateDoc(doc(db, 'users', targetUser.uid), {
+        activationStatus: 'active',
+        active: true,
+        decisionAt: now,
+        decidedBy: adminIdentifier,
+        updatedAt: now,
+      });
+
+      // Update cache lokal juga
+      try {
+        const localListStr = localStorage.getItem('baninali_registered_users');
+        if (localListStr) {
+          const localList: UserProfile[] = JSON.parse(localListStr);
+          const idx = localList.findIndex((u) => u.uid === targetUser.uid || u.email.toLowerCase() === targetUser.email.toLowerCase());
+          if (idx >= 0) {
+            localList[idx].activationStatus = 'active';
+            localList[idx].active = true;
+            localList[idx].decisionAt = now;
+            localList[idx].decidedBy = adminIdentifier;
+            localStorage.setItem('baninali_registered_users', JSON.stringify(localList));
+          }
+        }
+      } catch (e) {}
+
+      setStatusMessage({ 
+        type: 'success', 
+        text: `Akun "${targetUser.displayName || targetUser.email}" berhasil diaktifkan. Anggota kini dapat login.` 
+      });
+      loadUsers();
+    } catch (err: unknown) {
+      console.error('Approve user error:', err);
+      setStatusMessage({ type: 'error', text: 'Gagal mengaktifkan akun pendaftar.' });
+    }
+  };
+
+  // Tolak pendaftaran akun oleh admin
+  const handleRejectUser = async (targetUser: UserProfile) => {
+    try {
+      const now = new Date().toISOString();
+      const adminIdentifier = currentAdminProfile?.email || 'Admin';
+      await updateDoc(doc(db, 'users', targetUser.uid), {
+        activationStatus: 'rejected',
+        active: false,
+        decisionAt: now,
+        decidedBy: adminIdentifier,
+        updatedAt: now,
+      });
+
+      // Update cache lokal juga
+      try {
+        const localListStr = localStorage.getItem('baninali_registered_users');
+        if (localListStr) {
+          const localList: UserProfile[] = JSON.parse(localListStr);
+          const idx = localList.findIndex((u) => u.uid === targetUser.uid || u.email.toLowerCase() === targetUser.email.toLowerCase());
+          if (idx >= 0) {
+            localList[idx].activationStatus = 'rejected';
+            localList[idx].active = false;
+            localList[idx].decisionAt = now;
+            localList[idx].decidedBy = adminIdentifier;
+            localStorage.setItem('baninali_registered_users', JSON.stringify(localList));
+          }
+        }
+      } catch (e) {}
+
+      setStatusMessage({ 
+        type: 'success', 
+        text: `Pendaftaran "${targetUser.displayName || targetUser.email}" telah ditolak.` 
+      });
+      loadUsers();
+    } catch (err: unknown) {
+      console.error('Reject user error:', err);
+      setStatusMessage({ type: 'error', text: 'Gagal menolak akun pendaftar.' });
+    }
+  };
+
+  // Ubah status keaktifan akun (Nonaktifkan / Aktifkan Kembali)
+  const handleToggleUserActivation = async (targetUser: UserProfile) => {
+    const isCurrentlyActive = targetUser.activationStatus === 'active' || targetUser.active;
+    const nextStatus = isCurrentlyActive ? 'disabled' : 'active';
+    try {
+      const now = new Date().toISOString();
+      await updateDoc(doc(db, 'users', targetUser.uid), {
+        activationStatus: nextStatus,
+        active: nextStatus === 'active',
+        updatedAt: now,
+      });
+      setStatusMessage({ 
+        type: 'success', 
+        text: `Status akun ${targetUser.email} diubah menjadi ${nextStatus === 'active' ? 'Aktif' : 'Dinonaktifkan'}.` 
+      });
+      loadUsers();
+    } catch (err: unknown) {
+      setStatusMessage({ type: 'error', text: 'Gagal memperbarui status akun.' });
+    }
+  };
+
   // Link User to Member ID
   const handleLinkUserMember = async (uid: string, memberId: string) => {
     try {
@@ -550,7 +725,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           }`}
         >
           <ShieldCheck className="w-4 h-4" />
-          <span>Pengguna & Peran</span>
+          <span>Pengguna &amp; Persetujuan</span>
+          {usersList.filter((u) => u.role !== 'admin' && u.activationStatus !== 'active' && u.activationStatus !== 'rejected' && u.activationStatus !== 'disabled').length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-stone-950 animate-pulse">
+              {usersList.filter((u) => u.role !== 'admin' && u.activationStatus !== 'active' && u.activationStatus !== 'rejected' && u.activationStatus !== 'disabled').length}
+            </span>
+          )}
         </button>
 
         <button
@@ -727,75 +907,274 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       )}
 
       {/* Tab Content: USERS */}
+      {/* Tab Content: USERS (Persetujuan & Manajemen Pengguna) */}
       {activeTab === 'users' && (
-        <div className="bg-white rounded-2xl border border-stone-200 shadow-xs p-6 space-y-4">
-          <div>
-            <h3 className="text-base font-bold text-stone-900">
-              Kelola Pengguna & Hak Akses (Role)
-            </h3>
-            <p className="text-xs text-stone-500">
-              Pengguna dengan role <strong>admin</strong> memiliki akses penuh; role <strong>member</strong> dibatasi sesuai aturan privasi.
-            </p>
+        <div className="space-y-6">
+          {/* Header Panel */}
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-xs p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base sm:text-lg font-bold text-stone-900 font-serif-heritage flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-800" />
+                <span>Persetujuan &amp; Manajemen Pengguna</span>
+              </h3>
+              <p className="text-xs text-stone-500 mt-1">
+                Verifikasi pendaftaran anggota baru, setujui/tolak permohonan akses silsilah, serta kelola hak akses (role).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={loadUsers}
+              disabled={loadingUsers}
+              className="self-start sm:self-auto px-3.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-semibold flex items-center gap-2 border border-stone-300 transition-colors cursor-pointer disabled:opacity-60"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingUsers ? 'animate-spin' : ''}`} />
+              <span>Segarkan Data</span>
+            </button>
           </div>
 
           {loadingUsers ? (
-            <div className="p-8 text-center text-xs text-stone-500">Memuat data pengguna...</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-stone-700">
-                <thead className="bg-stone-50 text-stone-500 uppercase tracking-wider text-[11px] border-b border-stone-200">
-                  <tr>
-                    <th className="py-3 px-3">Email & Tampilan</th>
-                    <th className="py-3 px-3">Role Saat Ini</th>
-                    <th className="py-3 px-3">Tautan Silsilah (linkedMemberID)</th>
-                    <th className="py-3 px-3 text-right">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {usersList.map((u) => (
-                    <tr key={u.uid} className="hover:bg-stone-50">
-                      <td className="py-3 px-3">
-                        <div className="font-semibold text-stone-900">{u.displayName || u.email}</div>
-                        <div className="text-[10px] text-stone-400 font-mono">{u.email}</div>
-                      </td>
-                      <td className="py-3 px-3">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
-                            u.role === 'admin'
-                              ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                              : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                          }`}
-                        >
-                          {u.role}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3">
-                        <select
-                          value={u.linkedMemberID || ''}
-                          onChange={(e) => handleLinkUserMember(u.uid, e.target.value)}
-                          className="text-xs p-1 bg-stone-50 border border-stone-200 rounded max-w-[200px]"
-                        >
-                          <option value="">-- Belum Ditautkan --</option>
-                          {members.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.id}: {m.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        <button
-                          onClick={() => handleToggleUserRole(u)}
-                          className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded text-[11px] font-medium border border-stone-300 cursor-pointer"
-                        >
-                          Jadikan {u.role === 'admin' ? 'Member' : 'Admin'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="bg-white rounded-2xl border border-stone-200 p-12 text-center text-xs text-stone-500 flex flex-col items-center justify-center gap-2">
+              <span className="w-5 h-5 border-2 border-emerald-800 border-t-amber-400 rounded-full animate-spin" />
+              <span>Memuat data pendaftar &amp; pengguna...</span>
             </div>
+          ) : (
+            <>
+              {/* BAGIAN 1: Pendaftar Menunggu Aktivasi (Persetujuan Admin) */}
+              {(() => {
+                const pendingList = usersList.filter((u) => {
+                  if (u.role === 'admin') return false;
+                  if (u.activationStatus === 'active') return false;
+                  if (u.activationStatus === 'rejected') return false;
+                  if (u.activationStatus === 'disabled') return false;
+                  return true;
+                });
+
+                return (
+                  <div className="bg-white rounded-2xl border-2 border-amber-300/80 shadow-xs overflow-hidden">
+                    <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-50 via-amber-100/60 to-amber-50 border-b border-amber-200 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-amber-500 text-stone-950 flex items-center justify-center font-bold text-xs shadow-xs">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-amber-950 font-serif-heritage">
+                            Pendaftar Menunggu Persetujuan ({pendingList.length})
+                          </h4>
+                          <p className="text-[11px] text-amber-800">
+                            Pendaftar akun baru dengan status <em>"Menunggu aktivasi"</em> yang memerlukan persetujuan admin.
+                          </p>
+                        </div>
+                      </div>
+
+                      {pendingList.length > 0 && (
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500 text-stone-950 shadow-2xs">
+                          Perlu Tindakan
+                        </span>
+                      )}
+                    </div>
+
+                    {pendingList.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-stone-500 flex flex-col items-center justify-center gap-2">
+                        <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+                        <span className="font-medium text-stone-700">Semua pendaftaran telah ditinjau</span>
+                        <p className="text-[11px] text-stone-400">Tidak ada pendaftar baru yang menunggu persetujuan admin saat ini.</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs text-stone-700">
+                          <thead className="bg-stone-50 text-stone-600 uppercase tracking-wider text-[10.5px] border-b border-stone-200">
+                            <tr>
+                              <th className="py-3 px-4">Nama Lengkap</th>
+                              <th className="py-3 px-4">Alamat Email</th>
+                              <th className="py-3 px-4">Waktu Pendaftaran</th>
+                              <th className="py-3 px-4">Status Awal</th>
+                              <th className="py-3 px-4 text-right">Keputusan Admin</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-amber-100/70 bg-amber-50/20">
+                            {pendingList.map((u) => (
+                              <tr key={u.uid} className="hover:bg-amber-50/50 transition-colors">
+                                <td className="py-3.5 px-4 font-semibold text-stone-900">
+                                  {u.displayName || 'Tanpa Nama'}
+                                </td>
+                                <td className="py-3.5 px-4 font-mono text-[11px] text-stone-600">
+                                  {u.email}
+                                </td>
+                                <td className="py-3.5 px-4 text-stone-500">
+                                  {u.registeredAt || u.createdAt
+                                    ? new Date(u.registeredAt || u.createdAt).toLocaleDateString('id-ID', {
+                                        day: 'numeric',
+                                        month: 'short',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })
+                                    : '-'}
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase bg-amber-100 text-amber-900 border border-amber-300">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
+                                    Menunggu aktivasi
+                                  </span>
+                                </td>
+                                <td className="py-3.5 px-4 text-right">
+                                  <div className="inline-flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleApproveUser(u)}
+                                      className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                                      title="Setujui pendaftaran dan aktifkan akun anggota"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                      <span>Aktifkan</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRejectUser(u)}
+                                      className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-700 border border-red-300 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                                      title="Tolak pendaftaran akun"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                      <span>Tolak</span>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* BAGIAN 2: Daftar Seluruh Akun Pengguna Terdaftar */}
+              <div className="bg-white rounded-2xl border border-stone-200 shadow-xs p-5 sm:p-6 space-y-4">
+                <div>
+                  <h4 className="text-sm font-bold text-stone-900 font-serif-heritage">
+                    Daftar Seluruh Akun Pengguna ({usersList.length})
+                  </h4>
+                  <p className="text-xs text-stone-500">
+                    Kelola peran (admin/member), tautkan profil ke silsilah (linkedMemberID), dan atur keaktifan akun.
+                  </p>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs text-stone-700">
+                    <thead className="bg-stone-50 text-stone-500 uppercase tracking-wider text-[10.5px] border-b border-stone-200">
+                      <tr>
+                        <th className="py-3 px-3">Pengguna &amp; Email</th>
+                        <th className="py-3 px-3">Status Aktivasi</th>
+                        <th className="py-3 px-3">Peran (Role)</th>
+                        <th className="py-3 px-3">Tautan Silsilah (linkedMemberID)</th>
+                        <th className="py-3 px-3 text-right">Aksi Manajemen</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {usersList.map((u) => {
+                        const status = u.activationStatus || (u.role === 'admin' ? 'active' : (u.active ? 'active' : 'pending'));
+                        return (
+                          <tr key={u.uid} className="hover:bg-stone-50/80 transition-colors">
+                            <td className="py-3 px-3">
+                              <div className="font-semibold text-stone-900">{u.displayName || 'Tanpa Nama'}</div>
+                              <div className="text-[10.5px] text-stone-400 font-mono">{u.email}</div>
+                              {u.decisionAt && (
+                                <div className="text-[9.5px] text-stone-400 mt-0.5">
+                                  Keputusan: {new Date(u.decisionAt).toLocaleDateString('id-ID')} ({u.decidedBy || 'Admin'})
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-3 px-3">
+                              {status === 'active' && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-emerald-100 text-emerald-900 border border-emerald-300">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                                  Aktif
+                                </span>
+                              )}
+                              {status === 'pending' && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-amber-100 text-amber-900 border border-amber-300">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                  Menunggu aktivasi
+                                </span>
+                              )}
+                              {status === 'rejected' && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-red-100 text-red-900 border border-red-300">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-red-600" />
+                                  Ditolak
+                                </span>
+                              )}
+                              {status === 'disabled' && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-stone-200 text-stone-800 border border-stone-300">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-stone-500" />
+                                  Dinonaktifkan
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                                  u.role === 'admin'
+                                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                    : 'bg-stone-100 text-stone-800 border border-stone-200'
+                                }`}
+                              >
+                                {u.role}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <select
+                                value={u.linkedMemberID || ''}
+                                onChange={(e) => handleLinkUserMember(u.uid, e.target.value)}
+                                className="text-xs p-1.5 bg-stone-50 border border-stone-200 rounded-lg max-w-[210px] text-stone-800"
+                              >
+                                <option value="">-- Belum Ditautkan --</option>
+                                {members.map((m) => (
+                                  <option key={m.id} value={m.id}>
+                                    {m.id}: {m.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="py-3 px-3 text-right">
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleUserRole(u)}
+                                  className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded text-[11px] font-medium border border-stone-300 cursor-pointer transition-colors"
+                                  title="Ganti peran antara Admin dan Member"
+                                >
+                                  {u.role === 'admin' ? 'Jadikan Member' : 'Jadikan Admin'}
+                                </button>
+                                {status === 'active' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleUserActivation(u)}
+                                    className="px-2 py-1 bg-white hover:bg-stone-100 text-stone-700 rounded text-[11px] font-medium border border-stone-300 cursor-pointer"
+                                    title="Nonaktifkan akses akun pengguna"
+                                  >
+                                    Nonaktifkan
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApproveUser(u)}
+                                    className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded text-[11px] font-medium border border-emerald-300 cursor-pointer"
+                                    title="Aktifkan kembali akun ini"
+                                  >
+                                    Aktifkan
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}

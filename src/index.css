@@ -9,3 +9,29 @@
 .font-serif-heritage {
   font-family: 'Cinzel', Georgia, serif;
 }
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes loading-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+.animate-loading-bar {
+  animation: loading-bar 1.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}

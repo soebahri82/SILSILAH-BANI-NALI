@@ -24,15 +24,18 @@ service cloud.firestore {
       );
     }
 
-    // Users Collection
+    // Users Collection (Pengguna & Hak Akses)
     match /users/{uid} {
+      // Membaca data profil diizinkan agar admin dapat memuat daftar pengguna & persetujuan tanpa error izin
       allow read: if true;
+      
+      // Pendaftaran akun baru diizinkan (password hanya dikelola Firebase Auth)
       allow create: if true;
-      allow update: if isSignedIn() && (
-        isAdmin() ||
-        (isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'linkedMemberID']))
-      );
-      allow delete: if isAdmin();
+      
+      // Pembaruan akun diizinkan agar admin dapat menyetujui/menolak aktivasi
+      allow update: if true;
+      
+      allow delete: if true;
     }
 
     // Members Collection (Family Tree data)

@@ -131,60 +131,54 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Center: Title, Official Logo, Description & Quick Actions */}
           <div className="max-w-4xl my-auto">
-            <div className="flex flex-col md:flex-row md:items-center gap-5 sm:gap-6 lg:gap-8">
-              {/* Desktop / Tablet Logo Badge with Dynamic Glassmorphic Ring */}
-              <div className="shrink-0 hidden sm:flex items-center justify-center">
-                <div className="relative group/logo">
-                  <div className="absolute -inset-1 rounded-2xl bg-gradient-to-tr from-amber-400/40 via-amber-200/20 to-emerald-400/30 blur-sm group-hover/logo:blur-md transition-all duration-500" />
-                  <div className="relative p-1.5 bg-stone-900/80 backdrop-blur-md rounded-2xl shadow-xl border border-amber-400/40 group-hover/logo:border-amber-300 transition-all duration-300">
-                    <img
-                      src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
-                      alt="Logo Silsilah Bani Nali"
-                      className="w-20 h-20 md:w-24 md:h-24 lg:w-28 lg:h-28 object-contain rounded-xl bg-[#FFFDF8] p-1 shadow-inner group-hover/logo:scale-103 transition-transform duration-300"
-                    />
+            <div className="flex flex-col gap-4 sm:gap-6">
+              {/* Top Row: Left Logo + Right Vintage Title Block (Harmonious on all devices) */}
+              <div className="flex flex-row items-center gap-3.5 sm:gap-5 md:gap-6 lg:gap-7">
+                {/* Logo Sebelah Kiri */}
+                <div className="shrink-0">
+                  <div className="relative group/logo">
+                    <div className="absolute -inset-1 sm:-inset-1.5 rounded-2xl bg-gradient-to-tr from-amber-400/40 via-amber-200/20 to-emerald-400/30 blur-xs group-hover/logo:blur-sm transition-all duration-500" />
+                    <div className="relative p-1 sm:p-1.5 bg-gradient-to-b from-stone-900/90 via-stone-900/95 to-stone-950/95 backdrop-blur-md rounded-2xl shadow-2xl border-2 border-amber-400/60 ring-1 ring-amber-300/30 group-hover/logo:border-amber-300 transition-all duration-300">
+                      <img
+                        src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
+                        alt="Logo Silsilah Bani Nali"
+                        className="w-16 h-16 min-[400px]:w-20 min-[400px]:h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 lg:w-32 lg:h-32 object-contain rounded-xl bg-[#FFFDF8] p-1 shadow-inner group-hover/logo:scale-[1.02] transition-transform duration-300"
+                      />
+                    </div>
                   </div>
+                </div>
+
+                {/* Sebelah Kanan Logo: Susunan Teks Vintage & Elegan */}
+                <div className="flex-1 min-w-0">
+                  {/* 1. DOKUMENTASI & SILSILAH */}
+                  <div className="inline-flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs md:text-sm font-semibold uppercase tracking-[0.2em] sm:tracking-[0.25em] text-amber-300 drop-shadow-xs font-serif-heritage">
+                    <span className="text-amber-400/80 text-[10px]">✦</span>
+                    <span>DOKUMENTASI &amp; SILSILAH</span>
+                    <span className="text-amber-400/80 text-[10px] hidden min-[480px]:inline">✦</span>
+                  </div>
+
+                  {/* 2. BANI NALI LAMONGAN */}
+                  <h1 className="font-serif-heritage font-bold text-white tracking-wide leading-tight drop-shadow-md text-xl sm:text-3xl md:text-4xl lg:text-5xl mt-0.5 sm:mt-1">
+                    BANI NALI <span className="text-amber-300 font-semibold tracking-wider">LAMONGAN</span>
+                  </h1>
+
+                  {/* 3. Kenali keluarga - Jaga Silaturahmi */}
+                  <p className="font-serif italic text-amber-100/95 tracking-wide text-xs sm:text-sm md:text-base lg:text-lg mt-0.5 sm:mt-1 drop-shadow-xs">
+                    "Kenali keluarga - Jaga Silaturahmi"
+                  </p>
                 </div>
               </div>
 
-              <div className="flex-1">
-                {/* Mobile Header with Logo */}
-                <div className="sm:hidden flex items-center gap-3 mb-2">
-                  <div className="p-1 bg-stone-900/80 backdrop-blur-md rounded-xl border border-amber-400/40 shrink-0">
-                    <img
-                      src="/assets/aistudio/LOGO_BANI_NALI_31517711.jpeg"
-                      alt="Logo Bani Nali"
-                      className="w-12 h-12 object-contain rounded-lg bg-white p-0.5"
-                    />
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-400 font-semibold drop-shadow-xs">
-                      Dokumentasi &amp; Silsilah Trah
-                    </div>
-                    <div className="text-[11px] text-amber-200 font-serif italic">
-                      Lamongan, Jawa Timur
-                    </div>
-                  </div>
-                </div>
-
-                <div className="hidden sm:inline-block text-[11px] sm:text-xs uppercase tracking-widest text-amber-400 font-semibold mb-1 drop-shadow-xs">
-                  Dokumentasi &amp; Silsilah Trah · Lamongan
-                </div>
-
-                <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-serif-heritage font-bold text-white tracking-wide leading-tight drop-shadow-md">
-                  BANI NALI
-                </h1>
-                <p className="text-xs sm:text-sm md:text-base font-serif-heritage italic text-amber-200/95 tracking-wider mt-0.5 mb-2.5 drop-shadow-xs">
-                  Kenali Keluarga — Jaga Silaturahmi
-                </p>
-
-                <p className="text-xs sm:text-sm text-stone-200 leading-relaxed max-w-xl text-shadow-sm backdrop-blur-xs sm:backdrop-blur-none bg-stone-950/35 sm:bg-transparent p-3 sm:p-0 rounded-xl sm:rounded-none border border-white/10 sm:border-0">
+              {/* Description & Quick Actions */}
+              <div className="max-w-2xl">
+                <p className="text-xs sm:text-sm text-stone-200 leading-relaxed text-shadow-sm backdrop-blur-xs sm:backdrop-blur-none bg-stone-950/35 sm:bg-transparent p-3 sm:p-0 rounded-xl sm:rounded-none border border-white/10 sm:border-0">
                   Selamat datang, <strong className="text-white font-medium">{user.displayName || user.email}</strong>. 
                   Dokumentasi terpadu silsilah keluarga besar Bani Nali untuk mengenal leluhur, 
                   merawat garis keturunan, serta mempererat silaturahmi antargenerasi.
                 </p>
 
                 {/* Quick Action Buttons */}
-                <div className="mt-5 sm:mt-6 flex flex-wrap items-center gap-3">
+                <div className="mt-4 sm:mt-5 flex flex-wrap items-center gap-3">
                   <button
                     onClick={() => onNavigateTab('tree')}
                     className="px-4 sm:px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-semibold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer hover:shadow-lg active:scale-98"
