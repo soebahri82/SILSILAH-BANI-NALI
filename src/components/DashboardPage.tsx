@@ -104,10 +104,6 @@ export const DashboardPage: React.FC = () => {
         (data) => {
           setMembers(data);
           setLoadingData(false);
-          // If admin, auto-check and standardize legacy records (L/P, family)
-          if (isAdmin && data.length > 0) {
-            standardizeDatabaseRecords().catch((e) => console.warn('Auto-standardize notice:', e));
-          }
         },
         (err) => {
           console.error('Error fetching members:', err);

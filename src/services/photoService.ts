@@ -11,10 +11,28 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, handleFirestoreError, OperationType } from '../firebase/config';
+import { db, storage, handleFirestoreError, OperationType, isQuotaError } from '../firebase/config';
 import { FamilyPhoto } from '../types';
 
 const PHOTOS_COLLECTION = 'photos';
+const PHOTOS_CACHE_KEY = 'baninali_cached_photos';
+
+export function getCachedPhotos(): FamilyPhoto[] {
+  try {
+    const raw = localStorage.getItem(PHOTOS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return INITIAL_BANI_NALI_PHOTOS;
+}
+
+export function saveCachedPhotos(photos: FamilyPhoto[]): void {
+  try {
+    localStorage.setItem(PHOTOS_CACHE_KEY, JSON.stringify(photos));
+  } catch (e) {}
+}
 
 // Default initial photo collection
 export const INITIAL_BANI_NALI_PHOTOS: FamilyPhoto[] = [
@@ -55,25 +73,37 @@ export function subscribePhotos(
   onUpdate: (photos: FamilyPhoto[]) => void,
   onError?: (error: Error) => void
 ): () => void {
+  const initial = getCachedPhotos();
+  onUpdate(initial);
+
   try {
-    const q = query(collection(db, PHOTOS_COLLECTION), orderBy('createdAt', 'desc'));
+    const colRef = collection(db, PHOTOS_COLLECTION);
     return onSnapshot(
-      q,
+      colRef,
       (snapshot) => {
         const photos: FamilyPhoto[] = [];
         snapshot.forEach((docSnap) => {
           photos.push({ id: docSnap.id, ...docSnap.data() } as FamilyPhoto);
         });
-        onUpdate(photos);
+        if (photos.length > 0) {
+          photos.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+          saveCachedPhotos(photos);
+          onUpdate(photos);
+        } else {
+          onUpdate(initial);
+        }
       },
       (error) => {
-        console.error('Error listening to photos:', error);
+        console.warn('Photos subscription notice:', error.message || error);
+        if (isQuotaError(error)) {
+          onUpdate(getCachedPhotos());
+          return;
+        }
         if (onError) onError(error);
       }
     );
   } catch (error) {
-    console.error('Error setting up photos subscription:', error);
-    if (onError && error instanceof Error) onError(error);
+    if (onError && error instanceof Error && !isQuotaError(error)) onError(error);
     return () => {};
   }
 }
@@ -89,10 +119,16 @@ export async function addPhoto(photo: Omit<FamilyPhoto, 'id' | 'createdAt'> & { 
     updatedAt: now,
   };
 
+  const current = getCachedPhotos();
+  saveCachedPhotos([newPhoto, ...current.filter((p) => p.id !== photoId)]);
+
   try {
     await setDoc(doc(db, PHOTOS_COLLECTION, photoId), newPhoto);
     return photoId;
   } catch (error) {
+    if (isQuotaError(error)) {
+      return photoId;
+    }
     handleFirestoreError(error, OperationType.CREATE, `${PHOTOS_COLLECTION}/${photoId}`);
   }
 }
@@ -100,12 +136,20 @@ export async function addPhoto(photo: Omit<FamilyPhoto, 'id' | 'createdAt'> & { 
 // Update photo in Firestore (Admin)
 export async function updatePhoto(id: string, updates: Partial<FamilyPhoto>): Promise<void> {
   const path = `${PHOTOS_COLLECTION}/${id}`;
+  const current = getCachedPhotos();
+  saveCachedPhotos(
+    current.map((p) => (p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p))
+  );
+
   try {
     await updateDoc(doc(db, PHOTOS_COLLECTION, id), {
       ...updates,
       updatedAt: new Date().toISOString(),
     });
   } catch (error) {
+    if (isQuotaError(error)) {
+      return;
+    }
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
@@ -113,9 +157,15 @@ export async function updatePhoto(id: string, updates: Partial<FamilyPhoto>): Pr
 // Delete photo from Firestore
 export async function deletePhoto(id: string): Promise<void> {
   const path = `${PHOTOS_COLLECTION}/${id}`;
+  const current = getCachedPhotos();
+  saveCachedPhotos(current.filter((p) => p.id !== id));
+
   try {
     await deleteDoc(doc(db, PHOTOS_COLLECTION, id));
   } catch (error) {
+    if (isQuotaError(error)) {
+      return;
+    }
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
@@ -308,6 +358,10 @@ export async function uploadPhotoFile(
 
 // Seed initial photos if collection is empty
 export async function seedInitialPhotos(): Promise<number> {
+  saveCachedPhotos(INITIAL_BANI_NALI_PHOTOS);
+  if (localStorage.getItem('baninali_photos_seeded')) {
+    return INITIAL_BANI_NALI_PHOTOS.length;
+  }
   try {
     const snap = await getDocs(collection(db, PHOTOS_COLLECTION));
     if (snap.size === 0) {
@@ -316,10 +370,16 @@ export async function seedInitialPhotos(): Promise<number> {
         batch.set(doc(db, PHOTOS_COLLECTION, p.id), p);
       });
       await batch.commit();
+      localStorage.setItem('baninali_photos_seeded', 'true');
       return INITIAL_BANI_NALI_PHOTOS.length;
     }
+    localStorage.setItem('baninali_photos_seeded', 'true');
     return snap.size;
   } catch (error) {
+    if (isQuotaError(error)) {
+      localStorage.setItem('baninali_photos_seeded', 'true');
+      return INITIAL_BANI_NALI_PHOTOS.length;
+    }
     console.warn('Auto-seed photos notice:', error);
     return 0;
   }

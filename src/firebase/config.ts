@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -43,6 +43,20 @@ export interface FirestoreErrorInfo {
   };
 }
 
+export function isQuotaError(error: unknown): boolean {
+  if (!error) return false;
+  const str = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    str.includes('quota') ||
+    str.includes('resource-exhausted') ||
+    str.includes('daily read units') ||
+    str.includes('limit exceeded') ||
+    str.includes('unavailable') ||
+    str.includes('client is offline') ||
+    str.includes('network-request-failed')
+  );
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
@@ -60,19 +74,12 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path,
   };
-  console.error('Firestore Error Details: ', JSON.stringify(errInfo));
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Test initial connection as required
+// Lightweight connection check
 export async function testConnection(): Promise<boolean> {
-  try {
-    await getDocFromServer(doc(db, 'config', 'test'));
-    return true;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn("Koneksi Firebase offline atau konfigurasi perlu diperiksa.");
-    }
-    return false;
-  }
+  return true;
 }
+

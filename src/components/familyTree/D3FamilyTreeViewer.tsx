@@ -6,7 +6,6 @@ import {
   RotateCcw, 
   Maximize2, 
   Minimize2,
-  Search, 
   Users, 
   Heart, 
   ChevronDown, 
@@ -51,7 +50,6 @@ export const D3FamilyTreeViewer: React.FC<D3FamilyTreeViewerProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gRef = useRef<SVGGElement | null>(null);
 
-  const [searchQuery, setSearchQuery] = useState('');
   const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>({});
   const [linkStyle, setLinkStyle] = useState<'curved' | 'orthogonal'>('curved');
   const [zoomLevel, setZoomLevel] = useState<number>(1);
@@ -475,10 +473,7 @@ export const D3FamilyTreeViewer: React.FC<D3FamilyTreeViewerProps> = ({
     const male = isMale(member.gender);
     const genderCode = getGenderCode(member.gender);
 
-    const isMatch =
-      searchQuery.trim().length > 1 &&
-      member.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const isHighlight = highlightedMemberId === member.id || isMatch;
+    const isHighlight = highlightedMemberId === member.id;
 
     return (
       <div
@@ -601,19 +596,7 @@ export const D3FamilyTreeViewer: React.FC<D3FamilyTreeViewerProps> = ({
     >
       {/* Top D3 Toolbar */}
       <div className="p-3 sm:p-4 bg-white border-b border-stone-200 flex flex-wrap items-center justify-between gap-3">
-        {/* Search */}
-        <div className="relative w-full sm:w-64">
-          <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari anggota di pohon D3..."
-            className="w-full pl-9 pr-3 py-1.5 text-xs sm:text-sm bg-stone-50 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-800 text-stone-900"
-          />
-        </div>
-
-        {/* Action Controls: Fit, In, Out, Reset, Link Style */}
+        {/* Left Controls: Link Style Switcher & Branch Expansion */}
         <div className="flex items-center flex-wrap gap-2">
           {/* Link Style Switcher */}
           <div className="flex items-center bg-stone-100 p-0.5 rounded-lg border border-stone-200 text-xs">
@@ -658,6 +641,10 @@ export const D3FamilyTreeViewer: React.FC<D3FamilyTreeViewerProps> = ({
           >
             Tutup Cabang
           </button>
+        </div>
+
+        {/* Right Action Controls: Fit, In, Out, Reset, Height, Fullscreen, Print */}
+        <div className="flex items-center flex-wrap gap-2">
 
           {/* Zoom Controls */}
           <div className="flex items-center gap-1 bg-stone-100 p-0.5 rounded-lg border border-stone-200">

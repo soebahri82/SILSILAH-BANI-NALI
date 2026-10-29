@@ -10,10 +10,11 @@ import {
   orderBy,
   writeBatch,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase/config';
+import { db, handleFirestoreError, OperationType, isQuotaError } from '../firebase/config';
 import { FamilyEvent } from '../types';
 
 const EVENTS_COLLECTION = 'events';
+const EVENTS_CACHE_KEY = 'baninali_cached_events';
 
 export const INITIAL_BANI_NALI_EVENTS: FamilyEvent[] = [
   {
@@ -45,29 +46,62 @@ export const INITIAL_BANI_NALI_EVENTS: FamilyEvent[] = [
   },
 ];
 
+export function getCachedEvents(): FamilyEvent[] {
+  try {
+    const raw = localStorage.getItem(EVENTS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return INITIAL_BANI_NALI_EVENTS;
+}
+
+export function saveCachedEvents(events: FamilyEvent[]): void {
+  try {
+    localStorage.setItem(EVENTS_CACHE_KEY, JSON.stringify(events));
+  } catch (e) {}
+}
+
 export function subscribeEvents(
   onData: (events: FamilyEvent[]) => void,
   onError: (err: Error) => void
 ) {
+  const initial = getCachedEvents();
+  onData(initial);
+
   try {
-    const q = query(collection(db, EVENTS_COLLECTION), orderBy('tanggal', 'asc'));
+    const colRef = collection(db, EVENTS_COLLECTION);
     return onSnapshot(
-      q,
+      colRef,
       (snapshot) => {
         const list: FamilyEvent[] = [];
         snapshot.forEach((doc) => {
           list.push({ ...doc.data(), id: doc.id } as FamilyEvent);
         });
-        onData(list);
+        if (list.length > 0) {
+          list.sort((a, b) => (a.tanggal || '').localeCompare(b.tanggal || ''));
+          saveCachedEvents(list);
+          onData(list);
+        } else {
+          onData(initial);
+        }
       },
       (error) => {
-        console.error('Error in subscribeEvents:', error);
+        console.warn('Events subscription notice:', error.message || error);
+        if (isQuotaError(error)) {
+          onData(getCachedEvents());
+          return;
+        }
         handleFirestoreError(error, OperationType.GET, EVENTS_COLLECTION);
         onError(error);
       }
     );
   } catch (error: unknown) {
-    handleFirestoreError(error, OperationType.GET, EVENTS_COLLECTION);
+    if (!isQuotaError(error)) {
+      handleFirestoreError(error, OperationType.GET, EVENTS_COLLECTION);
+    }
+    return () => {};
   }
 }
 
@@ -78,8 +112,16 @@ export async function getEvents(): Promise<FamilyEvent[]> {
     snap.forEach((doc) => {
       list.push({ ...doc.data(), id: doc.id } as FamilyEvent);
     });
-    return list;
+    if (list.length > 0) {
+      list.sort((a, b) => (a.tanggal || '').localeCompare(b.tanggal || ''));
+      saveCachedEvents(list);
+      return list;
+    }
+    return getCachedEvents();
   } catch (error) {
+    if (isQuotaError(error)) {
+      return getCachedEvents();
+    }
     handleFirestoreError(error, OperationType.GET, EVENTS_COLLECTION);
   }
 }
@@ -94,10 +136,17 @@ export async function addEvent(event: Omit<FamilyEvent, 'createdAt' | 'updatedAt
     createdAt: now,
     updatedAt: now,
   };
+
+  const current = getCachedEvents();
+  saveCachedEvents([...current.filter((e) => e.id !== id), data]);
+
   try {
     await setDoc(doc(db, EVENTS_COLLECTION, id), data);
     return id;
   } catch (error) {
+    if (isQuotaError(error)) {
+      return id;
+    }
     handleFirestoreError(error, OperationType.CREATE, path);
   }
 }
@@ -108,32 +157,50 @@ export async function updateEvent(id: string, updates: Partial<FamilyEvent>): Pr
     ...updates,
     updatedAt: new Date().toISOString(),
   };
+
+  const current = getCachedEvents();
+  saveCachedEvents(current.map((e) => (e.id === id ? { ...e, ...data } : e)));
+
   try {
     await updateDoc(doc(db, EVENTS_COLLECTION, id), data);
   } catch (error) {
+    if (isQuotaError(error)) {
+      return;
+    }
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 
 export async function deleteEvent(id: string): Promise<void> {
   const path = `${EVENTS_COLLECTION}/${id}`;
+
+  const current = getCachedEvents();
+  saveCachedEvents(current.filter((e) => e.id !== id));
+
   try {
     await deleteDoc(doc(db, EVENTS_COLLECTION, id));
   } catch (error) {
+    if (isQuotaError(error)) {
+      return;
+    }
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 
 export async function seedInitialEvents(): Promise<number> {
-  const batch = writeBatch(db);
-  INITIAL_BANI_NALI_EVENTS.forEach((e) => {
-    const docRef = doc(db, EVENTS_COLLECTION, e.id);
-    batch.set(docRef, e);
-  });
+  saveCachedEvents(INITIAL_BANI_NALI_EVENTS);
   try {
+    const batch = writeBatch(db);
+    INITIAL_BANI_NALI_EVENTS.forEach((e) => {
+      const docRef = doc(db, EVENTS_COLLECTION, e.id);
+      batch.set(docRef, e);
+    });
     await batch.commit();
     return INITIAL_BANI_NALI_EVENTS.length;
   } catch (error) {
+    if (isQuotaError(error)) {
+      return INITIAL_BANI_NALI_EVENTS.length;
+    }
     handleFirestoreError(error, OperationType.WRITE, EVENTS_COLLECTION);
   }
 }

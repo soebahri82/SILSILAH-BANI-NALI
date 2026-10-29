@@ -12,11 +12,36 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, handleFirestoreError, OperationType } from '../firebase/config';
+import { db, storage, handleFirestoreError, OperationType, isQuotaError } from '../firebase/config';
 import { FamilyMember, PrivacyLevel } from '../types';
 import { getGenderCode } from '../utils/genderUtils';
 
 const MEMBERS_COLLECTION = 'members';
+const MEMBERS_CACHE_KEY = 'baninali_cached_members';
+
+// Local storage caching helpers
+export function getCachedMembers(): FamilyMember[] {
+  try {
+    const raw = localStorage.getItem(MEMBERS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Read members cache error:', e);
+  }
+  return INITIAL_BANI_NALI_MEMBERS;
+}
+
+export function saveCachedMembers(members: FamilyMember[]): void {
+  try {
+    localStorage.setItem(MEMBERS_CACHE_KEY, JSON.stringify(members));
+  } catch (e) {
+    console.warn('Save members cache error:', e);
+  }
+}
 
 // Initial Heritage Dataset for Bani Nali (Standardized: L/P & privacy 'family')
 export const INITIAL_BANI_NALI_MEMBERS: FamilyMember[] = [
@@ -550,34 +575,53 @@ export const INITIAL_BANI_NALI_MEMBERS: FamilyMember[] = [
   },
 ];
 
-// Subscribe to real-time members collection
+// Subscribe to real-time members collection with local cache fallback
 export function subscribeMembers(
   onData: (members: FamilyMember[]) => void,
   onError: (err: Error) => void
 ) {
+  // Always emit cached data immediately for instant responsive UI
+  const initialData = getCachedMembers();
+  onData(initialData);
+
   try {
-    const q = query(collection(db, MEMBERS_COLLECTION), orderBy('name', 'asc'));
+    const colRef = collection(db, MEMBERS_COLLECTION);
     return onSnapshot(
-      q,
+      colRef,
       (snapshot) => {
         const list: FamilyMember[] = [];
         snapshot.forEach((doc) => {
           list.push({ ...doc.data(), id: doc.id } as FamilyMember);
         });
-        onData(list);
+        if (list.length > 0) {
+          list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id'));
+          saveCachedMembers(list);
+          onData(list);
+        } else {
+          onData(initialData);
+        }
       },
       (error) => {
-        console.error('Error fetching members onSnapshot:', error);
+        console.warn('Members subscription note (fallback to local cache):', error.message || error);
+        if (isQuotaError(error)) {
+          // Gracefully continue using local cache without throwing fatal error
+          onData(getCachedMembers());
+          return;
+        }
         handleFirestoreError(error, OperationType.GET, MEMBERS_COLLECTION);
         onError(error);
       }
     );
   } catch (error: unknown) {
-    handleFirestoreError(error, OperationType.GET, MEMBERS_COLLECTION);
+    console.warn('Error setting up members subscription:', error);
+    if (!isQuotaError(error)) {
+      handleFirestoreError(error, OperationType.GET, MEMBERS_COLLECTION);
+    }
+    return () => {};
   }
 }
 
-// Get all members one-shot
+// Get all members one-shot with cache fallback
 export async function getMembers(): Promise<FamilyMember[]> {
   try {
     const snap = await getDocs(collection(db, MEMBERS_COLLECTION));
@@ -585,13 +629,22 @@ export async function getMembers(): Promise<FamilyMember[]> {
     snap.forEach((doc) => {
       list.push({ ...doc.data(), id: doc.id } as FamilyMember);
     });
-    return list;
+    if (list.length > 0) {
+      list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id'));
+      saveCachedMembers(list);
+      return list;
+    }
+    return getCachedMembers();
   } catch (error) {
+    if (isQuotaError(error)) {
+      console.warn('Firestore read quota reached, using local cached members');
+      return getCachedMembers();
+    }
     handleFirestoreError(error, OperationType.GET, MEMBERS_COLLECTION);
   }
 }
 
-// Get member by ID
+// Get member by ID with cache fallback
 export async function getMemberById(id: string): Promise<FamilyMember | null> {
   const path = `${MEMBERS_COLLECTION}/${id}`;
   try {
@@ -599,13 +652,19 @@ export async function getMemberById(id: string): Promise<FamilyMember | null> {
     if (snap.exists()) {
       return { ...snap.data(), id: snap.id } as FamilyMember;
     }
-    return null;
+    const cached = getCachedMembers().find((m) => m.id === id);
+    return cached || null;
   } catch (error) {
+    if (isQuotaError(error)) {
+      console.warn('Firestore read quota reached for member detail, checking cache');
+      const cached = getCachedMembers().find((m) => m.id === id);
+      return cached || null;
+    }
     handleFirestoreError(error, OperationType.GET, path);
   }
 }
 
-// Add member with standardized L/P and 'family' privacy
+// Add member with optimistic local cache and quota resilience
 export async function addMember(member: Omit<FamilyMember, 'createdAt' | 'updatedAt'>): Promise<string> {
   const id = member.id || `M${Date.now()}`;
   const path = `${MEMBERS_COLLECTION}/${id}`;
@@ -618,40 +677,69 @@ export async function addMember(member: Omit<FamilyMember, 'createdAt' | 'update
     createdAt: now,
     updatedAt: now,
   };
+
+  // Optimistic local cache save
+  const current = getCachedMembers();
+  const updated = [...current.filter((m) => m.id !== id), data];
+  saveCachedMembers(updated);
+
   try {
     await setDoc(doc(db, MEMBERS_COLLECTION, id), data);
     return id;
   } catch (error) {
+    if (isQuotaError(error)) {
+      console.warn('Firestore write saved locally (quota limit reached):', error);
+      return id;
+    }
     handleFirestoreError(error, OperationType.CREATE, path);
   }
 }
 
-// Update member with standardized L/P and 'family' privacy
+// Update member with optimistic local cache and quota resilience
 export async function updateMember(id: string, updates: Partial<FamilyMember>): Promise<void> {
   const path = `${MEMBERS_COLLECTION}/${id}`;
+  const now = new Date().toISOString();
   const data: Record<string, any> = {
     ...updates,
-    updatedAt: new Date().toISOString(),
+    updatedAt: now,
   };
   if (updates.gender !== undefined) {
     data.gender = getGenderCode(updates.gender);
   }
-  // Standardize privacy to family
   data.privacy = 'family';
+
+  // Optimistic local cache update
+  const current = getCachedMembers();
+  const updated = current.map((m) => (m.id === id ? { ...m, ...data } : m));
+  saveCachedMembers(updated);
 
   try {
     await updateDoc(doc(db, MEMBERS_COLLECTION, id), data);
   } catch (error) {
+    if (isQuotaError(error)) {
+      console.warn('Firestore update saved locally (quota limit reached):', error);
+      return;
+    }
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 
-// Delete member
+// Delete member with optimistic local cache and quota resilience
 export async function deleteMember(id: string): Promise<void> {
   const path = `${MEMBERS_COLLECTION}/${id}`;
+
+  // Optimistic local cache deletion
+  const current = getCachedMembers();
+  const updated = current.filter((m) => m.id !== id);
+  saveCachedMembers(updated);
+
   try {
     await deleteDoc(doc(db, MEMBERS_COLLECTION, id));
   } catch (error) {
+    if (isQuotaError(error)) {
+      console.warn('Firestore delete applied locally (quota limit reached):', error);
+      return;
+    }
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
@@ -677,20 +765,25 @@ export async function uploadMemberPhoto(memberId: string, file: File): Promise<s
 
 // Batch Seed Initial Bani Nali Genealogy Dataset
 export async function seedInitialBaniNali(): Promise<number> {
-  const batch = writeBatch(db);
-  INITIAL_BANI_NALI_MEMBERS.forEach((m) => {
-    const docRef = doc(db, MEMBERS_COLLECTION, m.id);
-    batch.set(docRef, m);
-  });
+  saveCachedMembers(INITIAL_BANI_NALI_MEMBERS);
   try {
+    const batch = writeBatch(db);
+    INITIAL_BANI_NALI_MEMBERS.forEach((m) => {
+      const docRef = doc(db, MEMBERS_COLLECTION, m.id);
+      batch.set(docRef, m);
+    });
     await batch.commit();
     return INITIAL_BANI_NALI_MEMBERS.length;
   } catch (error) {
+    if (isQuotaError(error)) {
+      console.warn('Firestore seed saved in local cache (quota limit reached):', error);
+      return INITIAL_BANI_NALI_MEMBERS.length;
+    }
     handleFirestoreError(error, OperationType.WRITE, MEMBERS_COLLECTION);
   }
 }
 
-// Standarisasi Database Langsung di Firestore (L = Laki-laki, P = Perempuan, Privasi = family)
+// Standarisasi Database di Firestore (Hanya dipanggil manual bila diperlukan)
 export async function standardizeDatabaseRecords(): Promise<number> {
   try {
     const snap = await getDocs(collection(db, MEMBERS_COLLECTION));
@@ -714,6 +807,10 @@ export async function standardizeDatabaseRecords(): Promise<number> {
     }
     return count;
   } catch (error) {
+    if (isQuotaError(error)) {
+      console.warn('Standardize deferred (quota limit reached):', error);
+      return 0;
+    }
     handleFirestoreError(error, OperationType.WRITE, MEMBERS_COLLECTION);
   }
 }

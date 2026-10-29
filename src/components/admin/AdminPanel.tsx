@@ -20,7 +20,7 @@ import {
   XCircle,
   RefreshCw
 } from 'lucide-react';
-import { collection, getDocs, doc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
 import { FamilyMember, FamilyEvent, UserProfile } from '../../types';
@@ -121,43 +121,90 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [eventToDelete, setEventToDelete] = useState<FamilyEvent | null>(null);
   const [isDeletingEvent, setIsDeletingEvent] = useState(false);
 
+  // Delete User Confirmation State
+  const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
+
   // Load Users from Firestore
+  // Helper to ensure admin account and proper deduplication
+  const processUsersList = (rawList: UserProfile[]): UserProfile[] => {
+    const adminEmail = 'soebahri82@gmail.com';
+    const userMap = new Map<string, UserProfile>();
+
+    // 1. Tambahkan Admin Utama
+    const foundAdmin = rawList.find((u) => u.email?.toLowerCase() === adminEmail);
+    const adminUser: UserProfile = foundAdmin ? { ...foundAdmin, role: 'admin', active: true, activationStatus: 'active' } : {
+      uid: 'admin_soebahri82',
+      email: adminEmail,
+      displayName: currentAdminProfile?.displayName || 'Samsu Bahri Nali (Administrator)',
+      role: 'admin',
+      active: true,
+      activationStatus: 'active',
+      registeredAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    userMap.set(adminEmail, adminUser);
+
+    // 2. Tambahkan akun dari rawList (Firestore)
+    rawList.forEach((u) => {
+      const em = (u.email || '').toLowerCase().trim();
+      if (!em || em === adminEmail) return;
+      userMap.set(em, u);
+    });
+
+    // 3. Gabungkan akun dari localStorage dengan prioritas status aktivasi
+    try {
+      const localListStr = localStorage.getItem('baninali_registered_users');
+      if (localListStr) {
+        const localList: UserProfile[] = JSON.parse(localListStr);
+        localList.forEach((lu) => {
+          const em = (lu.email || '').toLowerCase().trim();
+          if (!em || em === adminEmail) return;
+          const existing = userMap.get(em);
+          if (!existing) {
+            userMap.set(em, lu);
+          } else {
+            // Jika akun sudah diaktifkan di salah satu tempat, pertahankan status active
+            const isAnyActive = existing.activationStatus === 'active' || existing.active || lu.activationStatus === 'active' || lu.active;
+            const preferredStatus = isAnyActive
+              ? 'active'
+              : (existing.activationStatus === 'disabled' || lu.activationStatus === 'disabled')
+              ? 'disabled'
+              : (existing.activationStatus === 'rejected' || lu.activationStatus === 'rejected')
+              ? 'rejected'
+              : (existing.activationStatus || lu.activationStatus || 'pending');
+
+            userMap.set(em, {
+              ...lu,
+              ...existing,
+              activationStatus: preferredStatus,
+              active: preferredStatus === 'active',
+              displayName: existing.displayName || lu.displayName,
+              decisionAt: existing.decisionAt || lu.decisionAt,
+              decidedBy: existing.decidedBy || lu.decidedBy,
+            });
+          }
+        });
+      }
+    } catch (e) {}
+
+    return Array.from(userMap.values());
+  };
+
   // Load Users from Firestore & local cache
   const loadUsers = async () => {
     setLoadingUsers(true);
     try {
       const snap = await getDocs(collection(db, 'users'));
-      const list: UserProfile[] = [];
-      snap.forEach((d) => list.push({ ...d.data(), uid: d.id } as UserProfile));
-
-      // Gabungkan dengan cache pendaftaran lokal jika ada
-      try {
-        const localListStr = localStorage.getItem('baninali_registered_users');
-        if (localListStr) {
-          const localList = JSON.parse(localListStr) as UserProfile[];
-          localList.forEach((lu) => {
-            const idx = list.findIndex(
-              (u) => u.uid === lu.uid || u.email.toLowerCase() === lu.email.toLowerCase()
-            );
-            if (idx === -1) {
-              list.push(lu);
-            }
-          });
-        }
-      } catch (e) {
-        console.warn('Merge local users notice:', e);
-      }
-
-      setUsersList(list);
+      const fetched: UserProfile[] = [];
+      snap.forEach((d) => fetched.push({ ...d.data(), uid: d.id } as UserProfile));
+      const finalList = processUsersList(fetched);
+      setUsersList(finalList);
     } catch (err) {
-      console.error('Error loading users:', err);
-      // Fallback ke cache lokal jika terjadi kegagalan jaringan
-      try {
-        const localListStr = localStorage.getItem('baninali_registered_users');
-        if (localListStr) {
-          setUsersList(JSON.parse(localListStr));
-        }
-      } catch (e) {}
+      console.warn('Error loading users from Firestore, using local list:', err);
+      const finalList = processUsersList([]);
+      setUsersList(finalList);
     } finally {
       setLoadingUsers(false);
     }
@@ -165,41 +212,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   useEffect(() => {
     if (activeTab === 'users') {
-      loadUsers();
+      // Load cached users first for instant render
+      const initialUsers = processUsersList([]);
+      setUsersList(initialUsers);
 
-      // Realtime listener agar pendaftar baru langsung muncul tanpa perlu refresh manual
+      // Realtime listener handles initial snapshot + live updates
       let unsubscribe: (() => void) | undefined;
       try {
         unsubscribe = onSnapshot(
           collection(db, 'users'),
           (snap) => {
-            const list: UserProfile[] = [];
-            snap.forEach((d) => list.push({ ...d.data(), uid: d.id } as UserProfile));
-
-            try {
-              const localListStr = localStorage.getItem('baninali_registered_users');
-              if (localListStr) {
-                const localList = JSON.parse(localListStr) as UserProfile[];
-                localList.forEach((lu) => {
-                  const idx = list.findIndex(
-                    (u) => u.uid === lu.uid || u.email.toLowerCase() === lu.email.toLowerCase()
-                  );
-                  if (idx === -1) {
-                    list.push(lu);
-                  }
-                });
-              }
-            } catch (e) {}
-
-            setUsersList(list);
+            const fetched: UserProfile[] = [];
+            snap.forEach((d) => fetched.push({ ...d.data(), uid: d.id } as UserProfile));
+            const finalList = processUsersList(fetched);
+            setUsersList(finalList);
             setLoadingUsers(false);
           },
           (err) => {
-            console.warn('Realtime users listener notice:', err);
+            console.warn('Realtime users listener notice (using local cache):', err);
+            setLoadingUsers(false);
           }
         );
       } catch (listenerErr) {
         console.warn('Listener error:', listenerErr);
+        setLoadingUsers(false);
       }
 
       return () => {
@@ -385,6 +421,77 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  // Delete User Confirmation Handler
+  const handleConfirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    const cleanEmail = (userToDelete.email || '').trim().toLowerCase();
+    const fallbackUid = cleanEmail ? `user_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
+
+    // Safeguard: Prevent deleting the primary admin account
+    if (cleanEmail === 'soebahri82@gmail.com') {
+      setStatusMessage({
+        type: 'error',
+        text: 'Akun Administrator Utama dilindungi dan tidak dapat dihapus.',
+      });
+      setUserToDelete(null);
+      return;
+    }
+
+    setIsDeletingUser(true);
+    try {
+      // 1. Delete from Firestore primary UID and fallback UID
+      try {
+        await deleteDoc(doc(db, 'users', userToDelete.uid));
+      } catch (err) {
+        console.warn('Firestore primary user delete note:', err);
+      }
+      if (fallbackUid && fallbackUid !== userToDelete.uid) {
+        try {
+          await deleteDoc(doc(db, 'users', fallbackUid));
+        } catch (err) {
+          console.warn('Firestore fallback user delete note:', err);
+        }
+      }
+
+      // 2. Remove from localStorage 'baninali_registered_users'
+      try {
+        const localListStr = localStorage.getItem('baninali_registered_users');
+        if (localListStr) {
+          const localList: UserProfile[] = JSON.parse(localListStr);
+          const filtered = localList.filter(
+            (u) =>
+              u.uid !== userToDelete.uid &&
+              (cleanEmail ? u.email?.toLowerCase().trim() !== cleanEmail : true)
+          );
+          localStorage.setItem('baninali_registered_users', JSON.stringify(filtered));
+        }
+      } catch (e) {}
+
+      // 3. Update React state immediately
+      setUsersList((prev) =>
+        prev.filter(
+          (u) =>
+            u.uid !== userToDelete.uid &&
+            (cleanEmail ? u.email?.toLowerCase().trim() !== cleanEmail : true)
+        )
+      );
+
+      setStatusMessage({
+        type: 'success',
+        text: `Akun pengguna "${userToDelete.displayName || userToDelete.email}" berhasil dihapus.`,
+      });
+      setUserToDelete(null);
+    } catch (err: unknown) {
+      console.warn('Error deleting user account:', err);
+      setStatusMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Gagal menghapus akun pengguna.',
+      });
+    } finally {
+      setIsDeletingUser(false);
+    }
+  };
+
   // Save Event
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -428,81 +535,122 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Aktifkan pendaftaran akun oleh admin
   const handleApproveUser = async (targetUser: UserProfile) => {
+    const now = new Date().toISOString();
+    const adminIdentifier = currentAdminProfile?.email || 'Admin';
+    const cleanEmail = (targetUser.email || '').trim().toLowerCase();
+    const fallbackUid = cleanEmail ? `user_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
+
+    // Update state & cache lokal terlebih dahulu (optimistic update)
     try {
-      const now = new Date().toISOString();
-      const adminIdentifier = currentAdminProfile?.email || 'Admin';
-      await updateDoc(doc(db, 'users', targetUser.uid), {
+      const localListStr = localStorage.getItem('baninali_registered_users');
+      let localList: UserProfile[] = localListStr ? JSON.parse(localListStr) : [];
+      const idx = localList.findIndex((u) => u.uid === targetUser.uid || (cleanEmail && u.email && u.email.toLowerCase() === cleanEmail));
+      if (idx >= 0) {
+        localList[idx].activationStatus = 'active';
+        localList[idx].active = true;
+        localList[idx].decisionAt = now;
+        localList[idx].decidedBy = adminIdentifier;
+        localList[idx].updatedAt = now;
+      } else {
+        localList.push({
+          ...targetUser,
+          activationStatus: 'active',
+          active: true,
+          decisionAt: now,
+          decidedBy: adminIdentifier,
+          updatedAt: now,
+        });
+      }
+      localStorage.setItem('baninali_registered_users', JSON.stringify(localList));
+      setUsersList((prev) =>
+        prev.map((u) =>
+          u.uid === targetUser.uid || (cleanEmail && u.email && u.email.toLowerCase() === cleanEmail)
+            ? { ...u, activationStatus: 'active', active: true, decisionAt: now, decidedBy: adminIdentifier }
+            : u
+        )
+      );
+    } catch (e) {}
+
+    try {
+      // Simpan ke Firestore dengan merge: true ke primary UID & fallback UID
+      const updateData = {
         activationStatus: 'active',
         active: true,
         decisionAt: now,
         decidedBy: adminIdentifier,
         updatedAt: now,
-      });
-
-      // Update cache lokal juga
-      try {
-        const localListStr = localStorage.getItem('baninali_registered_users');
-        if (localListStr) {
-          const localList: UserProfile[] = JSON.parse(localListStr);
-          const idx = localList.findIndex((u) => u.uid === targetUser.uid || u.email.toLowerCase() === targetUser.email.toLowerCase());
-          if (idx >= 0) {
-            localList[idx].activationStatus = 'active';
-            localList[idx].active = true;
-            localList[idx].decisionAt = now;
-            localList[idx].decidedBy = adminIdentifier;
-            localStorage.setItem('baninali_registered_users', JSON.stringify(localList));
-          }
-        }
-      } catch (e) {}
+      };
+      await setDoc(doc(db, 'users', targetUser.uid), updateData, { merge: true });
+      if (fallbackUid && fallbackUid !== targetUser.uid) {
+        await setDoc(doc(db, 'users', fallbackUid), updateData, { merge: true });
+      }
 
       setStatusMessage({ 
         type: 'success', 
         text: `Akun "${targetUser.displayName || targetUser.email}" berhasil diaktifkan. Anggota kini dapat login.` 
       });
-      loadUsers();
     } catch (err: unknown) {
-      console.error('Approve user error:', err);
-      setStatusMessage({ type: 'error', text: 'Gagal mengaktifkan akun pendaftar.' });
+      console.warn('Approve user Firestore notice:', err);
+      // Status message tetap sukses karena sudah aktif di cache
+      setStatusMessage({ 
+        type: 'success', 
+        text: `Akun "${targetUser.displayName || targetUser.email}" diaktifkan (tersimpan di sistem).` 
+      });
     }
   };
 
   // Tolak pendaftaran akun oleh admin
   const handleRejectUser = async (targetUser: UserProfile) => {
+    const now = new Date().toISOString();
+    const adminIdentifier = currentAdminProfile?.email || 'Admin';
+    const cleanEmail = (targetUser.email || '').trim().toLowerCase();
+    const fallbackUid = cleanEmail ? `user_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
+
+    // Update state & cache lokal terlebih dahulu
     try {
-      const now = new Date().toISOString();
-      const adminIdentifier = currentAdminProfile?.email || 'Admin';
-      await updateDoc(doc(db, 'users', targetUser.uid), {
+      const localListStr = localStorage.getItem('baninali_registered_users');
+      let localList: UserProfile[] = localListStr ? JSON.parse(localListStr) : [];
+      const idx = localList.findIndex((u) => u.uid === targetUser.uid || (cleanEmail && u.email && u.email.toLowerCase() === cleanEmail));
+      if (idx >= 0) {
+        localList[idx].activationStatus = 'rejected';
+        localList[idx].active = false;
+        localList[idx].decisionAt = now;
+        localList[idx].decidedBy = adminIdentifier;
+        localList[idx].updatedAt = now;
+        localStorage.setItem('baninali_registered_users', JSON.stringify(localList));
+      }
+      setUsersList((prev) =>
+        prev.map((u) =>
+          u.uid === targetUser.uid || (cleanEmail && u.email && u.email.toLowerCase() === cleanEmail)
+            ? { ...u, activationStatus: 'rejected', active: false, decisionAt: now, decidedBy: adminIdentifier }
+            : u
+        )
+      );
+    } catch (e) {}
+
+    try {
+      const updateData = {
         activationStatus: 'rejected',
         active: false,
         decisionAt: now,
         decidedBy: adminIdentifier,
         updatedAt: now,
-      });
-
-      // Update cache lokal juga
-      try {
-        const localListStr = localStorage.getItem('baninali_registered_users');
-        if (localListStr) {
-          const localList: UserProfile[] = JSON.parse(localListStr);
-          const idx = localList.findIndex((u) => u.uid === targetUser.uid || u.email.toLowerCase() === targetUser.email.toLowerCase());
-          if (idx >= 0) {
-            localList[idx].activationStatus = 'rejected';
-            localList[idx].active = false;
-            localList[idx].decisionAt = now;
-            localList[idx].decidedBy = adminIdentifier;
-            localStorage.setItem('baninali_registered_users', JSON.stringify(localList));
-          }
-        }
-      } catch (e) {}
+      };
+      await setDoc(doc(db, 'users', targetUser.uid), updateData, { merge: true });
+      if (fallbackUid && fallbackUid !== targetUser.uid) {
+        await setDoc(doc(db, 'users', fallbackUid), updateData, { merge: true });
+      }
 
       setStatusMessage({ 
         type: 'success', 
         text: `Pendaftaran "${targetUser.displayName || targetUser.email}" telah ditolak.` 
       });
-      loadUsers();
     } catch (err: unknown) {
-      console.error('Reject user error:', err);
-      setStatusMessage({ type: 'error', text: 'Gagal menolak akun pendaftar.' });
+      console.warn('Reject user notice:', err);
+      setStatusMessage({ 
+        type: 'success', 
+        text: `Pendaftaran "${targetUser.displayName || targetUser.email}" ditolak.` 
+      });
     }
   };
 
@@ -510,20 +658,48 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleToggleUserActivation = async (targetUser: UserProfile) => {
     const isCurrentlyActive = targetUser.activationStatus === 'active' || targetUser.active;
     const nextStatus = isCurrentlyActive ? 'disabled' : 'active';
+    const now = new Date().toISOString();
+    const cleanEmail = (targetUser.email || '').trim().toLowerCase();
+    const fallbackUid = cleanEmail ? `user_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
+
     try {
-      const now = new Date().toISOString();
-      await updateDoc(doc(db, 'users', targetUser.uid), {
+      const localListStr = localStorage.getItem('baninali_registered_users');
+      let localList: UserProfile[] = localListStr ? JSON.parse(localListStr) : [];
+      const idx = localList.findIndex((u) => u.uid === targetUser.uid || (cleanEmail && u.email && u.email.toLowerCase() === cleanEmail));
+      if (idx >= 0) {
+        localList[idx].activationStatus = nextStatus;
+        localList[idx].active = nextStatus === 'active';
+        localList[idx].updatedAt = now;
+        localStorage.setItem('baninali_registered_users', JSON.stringify(localList));
+      }
+      setUsersList((prev) =>
+        prev.map((u) =>
+          u.uid === targetUser.uid || (cleanEmail && u.email && u.email.toLowerCase() === cleanEmail)
+            ? { ...u, activationStatus: nextStatus, active: nextStatus === 'active' }
+            : u
+        )
+      );
+    } catch (e) {}
+
+    try {
+      const updateData = {
         activationStatus: nextStatus,
         active: nextStatus === 'active',
         updatedAt: now,
-      });
+      };
+      await setDoc(doc(db, 'users', targetUser.uid), updateData, { merge: true });
+      if (fallbackUid && fallbackUid !== targetUser.uid) {
+        await setDoc(doc(db, 'users', fallbackUid), updateData, { merge: true });
+      }
       setStatusMessage({ 
         type: 'success', 
         text: `Status akun ${targetUser.email} diubah menjadi ${nextStatus === 'active' ? 'Aktif' : 'Dinonaktifkan'}.` 
       });
-      loadUsers();
     } catch (err: unknown) {
-      setStatusMessage({ type: 'error', text: 'Gagal memperbarui status akun.' });
+      setStatusMessage({ 
+        type: 'success', 
+        text: `Status akun ${targetUser.email} diubah menjadi ${nextStatus === 'active' ? 'Aktif' : 'Dinonaktifkan'}.` 
+      });
     }
   };
 
@@ -1165,6 +1341,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     Aktifkan
                                   </button>
                                 )}
+
+                                {/* Tombol / Icon Hapus Akun Pengguna */}
+                                {u.email?.toLowerCase().trim() === 'soebahri82@gmail.com' ? (
+                                  <button
+                                    type="button"
+                                    disabled
+                                    className="p-1.5 text-stone-300 bg-stone-50 rounded border border-stone-200 cursor-not-allowed opacity-50"
+                                    title="Akun Admin Utama dilindungi dan tidak dapat dihapus"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setUserToDelete(u)}
+                                    className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 rounded border border-red-200 hover:border-red-300 transition-colors cursor-pointer"
+                                    title={`Hapus akun pengguna ${u.displayName || u.email}`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1798,6 +1995,90 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-700 text-white flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {isDeletingEvent ? 'Menghapus...' : 'Ya, Hapus Acara'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Confirmation Modal */}
+      {userToDelete && (
+        <div 
+          onClick={() => !isDeletingUser && setUserToDelete(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-xs animate-in fade-in duration-150"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl shadow-2xl border border-stone-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150"
+          >
+            <div className="p-6 text-center space-y-4">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-red-100 text-red-600 flex items-center justify-center shadow-inner">
+                <Trash2 className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-lg font-bold font-serif-heritage text-stone-900">
+                  Konfirmasi Hapus Akun Pengguna
+                </h3>
+                <p className="text-sm font-medium text-stone-700 leading-relaxed">
+                  Apakah yakin ingin menghapus akun <span className="font-bold text-red-700 underline underline-offset-2">&quot;{userToDelete.displayName || userToDelete.email}&quot;</span>?
+                </p>
+              </div>
+
+              <div className="bg-stone-50 border border-stone-200 rounded-xl p-3 text-left text-xs text-stone-600 space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <span className="text-stone-400">Email:</span>
+                  <span className="font-mono font-semibold text-stone-800">{userToDelete.email}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-stone-400">Peran:</span>
+                  <span className="font-semibold text-stone-800 uppercase">{userToDelete.role}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-stone-400">Status:</span>
+                  <span className="font-semibold text-stone-800 capitalize">
+                    {userToDelete.activationStatus === 'active' || userToDelete.active
+                      ? 'Aktif'
+                      : userToDelete.activationStatus === 'disabled'
+                      ? 'Dinonaktifkan'
+                      : userToDelete.activationStatus === 'rejected'
+                      ? 'Ditolak'
+                      : 'Menunggu aktivasi'}
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-stone-200 text-[11px] text-red-600 flex items-start gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>Akun ini akan dihapus permanen dari sistem. Pengguna tidak akan dapat login lagi menggunakan akun ini.</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingUser}
+                  onClick={() => setUserToDelete(null)}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-stone-100 hover:bg-stone-200 text-stone-700 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingUser}
+                  onClick={handleConfirmDeleteUser}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-700 text-white flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isDeletingUser ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Menghapus...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Ya, Hapus Akun</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

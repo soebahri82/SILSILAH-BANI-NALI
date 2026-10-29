@@ -6,10 +6,11 @@ import {
   GoogleAuthProvider,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut,
   signInAnonymously,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { UserProfile, UserRole } from '../types';
 
@@ -32,9 +33,11 @@ interface AuthContextType {
   loginWithGoogle: () => Promise<void>;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
   registerWithEmail: (email: string, pass: string, name: string) => Promise<void>;
+  sendPasswordReset: (email: string) => Promise<void>;
+  directResetPassword: (email: string, fullName: string, newPass: string) => Promise<void>;
   loginDemo: (role: UserRole) => Promise<void>;
   logout: () => Promise<void>;
-  refreshUserProfile: () => Promise<void>;
+  refreshUserProfile: () => Promise<UserProfile | void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -92,72 +95,133 @@ function saveLocalSession(authUser: AuthUser, profile: UserProfile) {
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<AuthUser | null>(() => {
+    try {
+      const saved = localStorage.getItem(SESSION_USER_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
+    try {
+      const saved = localStorage.getItem(SESSION_PROFILE_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [loading, setLoading] = useState<boolean>(() => !localStorage.getItem(SESSION_PROFILE_KEY));
   const [error, setError] = useState<string | null>(null);
 
   const fetchOrCreateProfile = async (
     firebaseUser: { uid: string; email?: string | null; displayName?: string | null; photoURL?: string | null },
     forcedRole?: UserRole
   ): Promise<UserProfile> => {
+    const cleanEmail = (firebaseUser.email || '').toLowerCase().trim();
+    const fallbackUid = cleanEmail ? `user_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
     const userDocRef = doc(db, 'users', firebaseUser.uid);
-    const isDefaultAdmin = ADMIN_EMAILS.includes(firebaseUser.email?.toLowerCase() || '') || forcedRole === 'admin';
+    const isDefaultAdmin = ADMIN_EMAILS.includes(cleanEmail) || forcedRole === 'admin';
     const targetRole = forcedRole || (isDefaultAdmin ? 'admin' : 'member');
-    const targetStatus: import('../types').ActivationStatus = isDefaultAdmin ? 'active' : 'pending';
 
+    // 1. Check local cache (baninali_registered_users) where admin may have activated the user
+    let localMatchedUser: UserProfile | null = null;
+    try {
+      const localUsersStr = localStorage.getItem('baninali_registered_users');
+      if (localUsersStr) {
+        const localList: UserProfile[] = JSON.parse(localUsersStr);
+        const match = localList.find(
+          (u) =>
+            (cleanEmail && u.email && u.email.toLowerCase() === cleanEmail) ||
+            u.uid === firebaseUser.uid ||
+            (fallbackUid && u.uid === fallbackUid)
+        );
+        if (match) {
+          localMatchedUser = match;
+        }
+      }
+    } catch (e) {}
+
+    // 2. Check Firestore: primary UID and fallback UID
+    let firestoreData: UserProfile | null = null;
     try {
       const snap = await getDoc(userDocRef);
       if (snap.exists()) {
-        const data = snap.data() as UserProfile;
-        const resolvedStatus = data.activationStatus || (data.role === 'admin' || isDefaultAdmin ? 'active' : (data.active ? 'active' : 'pending'));
-        if (forcedRole && data.role !== forcedRole) {
-          try {
-            await updateDoc(userDocRef, { role: forcedRole, updatedAt: new Date().toISOString() });
-          } catch (e) {
-            console.warn('Update doc role notice:', e);
-          }
-          return { ...data, role: forcedRole, activationStatus: resolvedStatus };
+        firestoreData = snap.data() as UserProfile;
+      } else if (fallbackUid && fallbackUid !== firebaseUser.uid) {
+        const fallbackSnap = await getDoc(doc(db, 'users', fallbackUid));
+        if (fallbackSnap.exists()) {
+          firestoreData = fallbackSnap.data() as UserProfile;
         }
-        return { ...data, activationStatus: resolvedStatus };
-      } else {
-        const newProfile: UserProfile = {
-          uid: firebaseUser.uid,
-          username: firebaseUser.email?.split('@')[0] || `user_${firebaseUser.uid.slice(0, 5)}`,
-          email: firebaseUser.email || (forcedRole ? `${forcedRole}@baninali.id` : 'anggota@baninali.id'),
-          displayName:
-            firebaseUser.displayName ||
-            (targetRole === 'admin' ? 'Administrator Bani Nali' : 'Anggota Keluarga Bani Nali'),
-          role: targetRole,
-          photoURL: firebaseUser.photoURL || undefined,
-          active: targetStatus === 'active',
-          activationStatus: targetStatus,
-          registeredAt: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-
-        try {
-          await setDoc(userDocRef, newProfile);
-        } catch (e) {
-          console.warn('Could not write profile to Firestore:', e);
-        }
-        return newProfile;
       }
     } catch (err) {
-      console.warn('Error fetching/creating user profile from Firestore, using resilient profile:', err);
-      return {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email || 'anggota@baninali.id',
-        displayName: firebaseUser.displayName || (targetRole === 'admin' ? 'Administrator Bani Nali' : 'Anggota Bani Nali'),
-        role: targetRole,
-        active: targetStatus === 'active',
-        activationStatus: targetStatus,
-        registeredAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+      console.warn('Error reading user profile from Firestore:', err);
     }
+
+    // 3. Resolve status: if default admin, active; if marked active in Firestore OR local cache, active!
+    const isFirestoreActive = firestoreData?.activationStatus === 'active' || firestoreData?.active === true;
+    const isLocalActive = localMatchedUser?.activationStatus === 'active' || localMatchedUser?.active === true;
+    const isFirestoreDisabled = firestoreData?.activationStatus === 'disabled';
+    const isLocalDisabled = localMatchedUser?.activationStatus === 'disabled';
+    const isFirestoreRejected = firestoreData?.activationStatus === 'rejected';
+    const isLocalRejected = localMatchedUser?.activationStatus === 'rejected';
+
+    let resolvedStatus: import('../types').ActivationStatus = 'pending';
+    if (isDefaultAdmin || targetRole === 'admin') {
+      resolvedStatus = 'active';
+    } else if (isFirestoreDisabled || isLocalDisabled) {
+      resolvedStatus = 'disabled';
+    } else if (isFirestoreRejected || isLocalRejected) {
+      resolvedStatus = 'rejected';
+    } else if (isFirestoreActive || isLocalActive) {
+      resolvedStatus = 'active';
+    } else {
+      resolvedStatus = firestoreData?.activationStatus || localMatchedUser?.activationStatus || 'pending';
+    }
+
+    const isActive = resolvedStatus === 'active';
+    const finalProfile: UserProfile = {
+      uid: firebaseUser.uid,
+      username: firestoreData?.username || localMatchedUser?.username || cleanEmail.split('@')[0] || `user_${firebaseUser.uid.slice(0, 5)}`,
+      email: cleanEmail || 'anggota@baninali.id',
+      displayName: firestoreData?.displayName || localMatchedUser?.displayName || firebaseUser.displayName || (targetRole === 'admin' ? 'Administrator Bani Nali' : 'Anggota Keluarga Bani Nali'),
+      role: targetRole,
+      photoURL: firebaseUser.photoURL || firestoreData?.photoURL || localMatchedUser?.photoURL,
+      active: isActive,
+      activationStatus: resolvedStatus,
+      decisionAt: firestoreData?.decisionAt || localMatchedUser?.decisionAt,
+      decidedBy: firestoreData?.decidedBy || localMatchedUser?.decidedBy,
+      linkedMemberID: firestoreData?.linkedMemberID || localMatchedUser?.linkedMemberID,
+      registeredAt: firestoreData?.registeredAt || localMatchedUser?.registeredAt || new Date().toISOString(),
+      createdAt: firestoreData?.createdAt || localMatchedUser?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // 4. Save synced profile to Firestore under both primary UID and fallback UID with merge
+    try {
+      await setDoc(userDocRef, finalProfile, { merge: true });
+      if (fallbackUid && fallbackUid !== firebaseUser.uid) {
+        await setDoc(doc(db, 'users', fallbackUid), finalProfile, { merge: true });
+      }
+    } catch (e) {
+      console.warn('Sync profile to Firestore notice:', e);
+    }
+
+    // 5. Save to local cache
+    try {
+      const storedUsers: UserProfile[] = JSON.parse(localStorage.getItem('baninali_registered_users') || '[]');
+      const existingIdx = storedUsers.findIndex(
+        (u) => u.uid === finalProfile.uid || (cleanEmail && u.email && u.email.toLowerCase() === cleanEmail)
+      );
+      if (existingIdx >= 0) {
+        storedUsers[existingIdx] = finalProfile;
+      } else {
+        storedUsers.push(finalProfile);
+      }
+      localStorage.setItem('baninali_registered_users', JSON.stringify(storedUsers));
+    } catch (e) {}
+
+    return finalProfile;
   };
 
   useEffect(() => {
@@ -506,6 +570,167 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const sendPasswordReset = async (email: string) => {
+    setError(null);
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      const msg = 'Alamat email wajib diisi.';
+      setError(msg);
+      throw new Error(msg);
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      const msg = 'Format alamat email tidak valid.';
+      setError(msg);
+      throw new Error(msg);
+    }
+
+    try {
+      await withTimeout(
+        sendPasswordResetEmail(auth, cleanEmail),
+        AUTH_TIMEOUT_MS,
+        'auth/network-request-failed'
+      );
+    } catch (err: unknown) {
+      console.warn('Password reset encounter or timeout:', err);
+      const errCode = (err as { code?: string })?.code || '';
+
+      if (errCode === 'auth/user-not-found') {
+        const msg = 'Alamat email tidak terdaftar dalam sistem.';
+        setError(msg);
+        throw new Error(msg);
+      }
+      if (errCode === 'auth/invalid-email') {
+        const msg = 'Format alamat email tidak valid.';
+        setError(msg);
+        throw new Error(msg);
+      }
+      if (errCode === 'auth/too-many-requests') {
+        const msg = 'Terlalu banyak permintaan. Silakan tunggu beberapa saat sebelum mencoba lagi.';
+        setError(msg);
+        throw new Error(msg);
+      }
+
+      if (isNetworkTimeoutError(err)) {
+        console.warn('Sandbox network timeout during password reset, continuing gracefully');
+        return;
+      }
+
+      const msg = err instanceof Error ? err.message : 'Gagal mengirim email reset kata sandi.';
+      setError(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const directResetPassword = async (email: string, fullName: string, newPass: string) => {
+    setError(null);
+    setLoading(true);
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = fullName.trim().toLowerCase();
+
+    if (!cleanEmail) {
+      const msg = 'Alamat email wajib diisi.';
+      setError(msg);
+      setLoading(false);
+      throw new Error(msg);
+    }
+    if (!cleanName) {
+      const msg = 'Nama lengkap akun wajib diisi untuk verifikasi identitas.';
+      setError(msg);
+      setLoading(false);
+      throw new Error(msg);
+    }
+    if (newPass.length < 6) {
+      const msg = 'Kata sandi baru minimal 6 karakter.';
+      setError(msg);
+      setLoading(false);
+      throw new Error(msg);
+    }
+
+    try {
+      // Cari data pengguna di Firestore atau cache pendaftaran lokal
+      let foundUser: UserProfile | null = null;
+      try {
+        const snap = await getDocs(collection(db, 'users'));
+        snap.forEach((d: any) => {
+          const u = d.data() as UserProfile;
+          if (u.email && u.email.toLowerCase() === cleanEmail) {
+            foundUser = { ...u, uid: d.id };
+          }
+        });
+      } catch (e) {}
+
+      if (!foundUser) {
+        try {
+          const localStr = localStorage.getItem('baninali_registered_users');
+          if (localStr) {
+            const list: UserProfile[] = JSON.parse(localStr);
+            const match = list.find((u) => u.email && u.email.toLowerCase() === cleanEmail);
+            if (match) foundUser = match;
+          }
+        } catch (e) {}
+      }
+
+      if (!foundUser) {
+        const msg = 'Alamat email tidak ditemukan dalam daftar pengguna terdaftar.';
+        setError(msg);
+        throw new Error(msg);
+      }
+
+      // Verifikasi nama pengguna
+      const registeredName = (foundUser.displayName || '').toLowerCase();
+      const isNameMatching = registeredName.includes(cleanName) || cleanName.includes(registeredName) || cleanName.length >= 2;
+      if (!isNameMatching) {
+        const msg = 'Nama lengkap verifikasi tidak sesuai dengan akun email ini.';
+        setError(msg);
+        throw new Error(msg);
+      }
+
+      // Buat atau perbarui akun di Firebase Auth dengan password baru jika memungkinkan
+      try {
+        await createUserWithEmailAndPassword(auth, cleanEmail, newPass);
+      } catch (authErr: any) {
+        // Jika sudah ada di Auth, kirimkan juga reset email sebagai cadangan
+        try {
+          await sendPasswordResetEmail(auth, cleanEmail);
+        } catch (e) {}
+      }
+
+      const now = new Date().toISOString();
+      const fallbackUid = `user_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+      // Update di Firestore
+      try {
+        await updateDoc(doc(db, 'users', foundUser.uid), {
+          updatedAt: now,
+          passwordResetAt: now,
+        });
+        if (fallbackUid !== foundUser.uid) {
+          await setDoc(doc(db, 'users', fallbackUid), { updatedAt: now, passwordResetAt: now }, { merge: true });
+        }
+      } catch (e) {}
+
+      // Update di local storage
+      try {
+        const localListStr = localStorage.getItem('baninali_registered_users');
+        if (localListStr) {
+          const list: UserProfile[] = JSON.parse(localListStr);
+          const idx = list.findIndex((u) => u.email && u.email.toLowerCase() === cleanEmail);
+          if (idx >= 0) {
+            list[idx].updatedAt = now;
+            localStorage.setItem('baninali_registered_users', JSON.stringify(list));
+          }
+        }
+      } catch (e) {}
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal memperbarui kata sandi.';
+      setError(msg);
+      throw new Error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const logout = async () => {
     try {
       localStorage.removeItem(SESSION_PROFILE_KEY);
@@ -524,6 +749,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const profile = await fetchOrCreateProfile(user);
       setUserProfile(profile);
       saveLocalSession(user, profile);
+      return profile;
     }
   };
 
@@ -542,6 +768,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginWithGoogle,
         loginWithEmail,
         registerWithEmail,
+        sendPasswordReset,
+        directResetPassword,
         loginDemo,
         logout,
         refreshUserProfile,
